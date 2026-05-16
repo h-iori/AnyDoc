@@ -95,21 +95,12 @@ fun FileListItem(
             .padding(horizontal = spacing.cardPadding, vertical = spacing.itemGap),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .shadow(elevation = 10.dp, shape = MaterialTheme.shapes.small, ambientColor = visual.glowColor, spotColor = visual.glowColor)
-                .size(sizes.fileIconContainer)
-                .background(visual.containerColor, MaterialTheme.shapes.small)
-                .border(1.dp, visual.borderColor, MaterialTheme.shapes.small),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = visual.iconRes),
-                contentDescription = visual.label,
-                tint = Color.Unspecified,
-                modifier = Modifier.size(sizes.fileIcon)
-            )
-        }
+        androidx.compose.foundation.Image(
+            painter = painterResource(id = visual.iconRes),
+            contentDescription = visual.label,
+            modifier = Modifier.size(sizes.fileIconContainer),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        )
 
         Spacer(modifier = Modifier.size(spacing.itemGap))
 

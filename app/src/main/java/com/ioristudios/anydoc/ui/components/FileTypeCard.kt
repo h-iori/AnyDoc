@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
@@ -48,34 +49,34 @@ fun FileTypeCard(
         tonalElevation = 3.dp,
         shadowElevation = 2.dp
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, visual.borderColor, MaterialTheme.shapes.medium)
-                .padding(spacing.cardPadding),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = horizontalAlignment
         ) {
-            Box(
+            androidx.compose.foundation.Image(
+                painter = painterResource(id = visual.iconRes),
+                contentDescription = null,
                 modifier = Modifier
-                    .shadow(elevation = 10.dp, shape = MaterialTheme.shapes.small, ambientColor = visual.glowColor, spotColor = visual.glowColor)
-                    .size(sizes.fileIconContainer)
-                    .background(visual.containerColor, MaterialTheme.shapes.small)
-                    .border(1.dp, visual.borderColor, MaterialTheme.shapes.small),
-                contentAlignment = Alignment.Center
+                    .matchParentSize()
+                    .alpha(0.2f)
+                    .padding(16.dp),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(spacing.cardPadding),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = horizontalAlignment
             ) {
-                androidx.compose.material3.Icon(
-                    painter = painterResource(id = visual.iconRes),
-                    contentDescription = title,
-                    tint = Color.Unspecified,
-                    modifier = Modifier.size(sizes.fileIcon)
+                androidx.compose.foundation.layout.Spacer(modifier = Modifier.heightIn(min = 64.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = visual.accentColor
                 )
             }
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = visual.accentColor
-            )
         }
     }
 }
