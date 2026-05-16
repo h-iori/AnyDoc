@@ -1,4 +1,4 @@
-﻿package com.ioristudios.anydoc.ui.components
+package com.ioristudios.anydoc.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -55,6 +55,7 @@ fun FileListItem(
     val visual = FileTypeIconRegistry.resolveFileVisual(fileItem.name)
     var visible by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 
     LaunchedEffect(Unit) {
         if (index < 12) {
@@ -84,7 +85,10 @@ fun FileListItem(
             }
             .background(AppColors.Surface, RoundedCornerShape(14.dp))
             .border(1.dp, AppColors.BorderSubtle, RoundedCornerShape(14.dp))
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .then(if (onClick != null) Modifier.clickable { 
+                haptics.performHapticFeedback()
+                onClick() 
+            } else Modifier)
             .padding(horizontal = spacing.cardPadding, vertical = spacing.itemGap),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -125,7 +129,10 @@ fun FileListItem(
         }
 
         Box {
-            IconButton(onClick = { menuExpanded = true }) {
+            IconButton(onClick = { 
+                haptics.performHapticFeedback()
+                menuExpanded = true 
+            }) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "More options",
@@ -139,12 +146,18 @@ fun FileListItem(
             ) {
                 DropdownMenuItem(
                     text = { Text("Share") },
-                    onClick = { menuExpanded = false },
+                    onClick = { 
+                        haptics.performHapticFeedback()
+                        menuExpanded = false 
+                    },
                     leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
                 )
                 DropdownMenuItem(
                     text = { Text("Delete", color = AppColors.Danger) },
-                    onClick = { menuExpanded = false },
+                    onClick = { 
+                        haptics.performHapticFeedback()
+                        menuExpanded = false 
+                    },
                     leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = AppColors.Danger) }
                 )
             }

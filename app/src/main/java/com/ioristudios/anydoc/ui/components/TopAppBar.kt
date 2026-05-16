@@ -48,7 +48,11 @@ fun TopAppBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = onMenuClick) {
+        val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+        IconButton(onClick = {
+            haptics.performHapticFeedback()
+            onMenuClick()
+        }) {
             Icon(
                 imageVector = Icons.Default.Menu,
                 contentDescription = "Menu",

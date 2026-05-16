@@ -103,7 +103,11 @@ fun AboutScreen(onBack: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    IconButton(onClick = { onBack() }) {
+                    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+                    IconButton(onClick = { 
+                        haptics.performHapticFeedback()
+                        onBack() 
+                    }) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
                     }
                     Spacer(Modifier.width(8.dp))

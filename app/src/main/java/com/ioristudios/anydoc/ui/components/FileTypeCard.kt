@@ -34,11 +34,15 @@ fun FileTypeCard(
     val spacing = rememberAppSpacing()
     val sizes = rememberAppSizes()
     val visual = FileTypeIconRegistry.resolveFileVisual(fileNameForIcon)
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 
     Surface(
         modifier = modifier
             .heightIn(min = sizes.fileCardMinHeight)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+            .then(if (onClick != null) Modifier.clickable { 
+                haptics.performHapticFeedback()
+                onClick() 
+            } else Modifier),
         shape = MaterialTheme.shapes.medium,
         color = AppColors.Surface,
         tonalElevation = 3.dp,

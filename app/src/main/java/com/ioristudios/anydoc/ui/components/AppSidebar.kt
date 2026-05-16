@@ -184,6 +184,8 @@ private fun StaggeredSidebarItem(
         label = "itemSlide"
     )
 
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -192,7 +194,10 @@ private fun StaggeredSidebarItem(
                 translationX = animTranslationX
             }
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() }
+            .clickable { 
+                haptics.performHapticFeedback()
+                onClick() 
+            }
             .padding(vertical = 12.dp, horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)

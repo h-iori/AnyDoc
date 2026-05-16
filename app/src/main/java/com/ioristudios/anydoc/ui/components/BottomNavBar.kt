@@ -46,9 +46,14 @@ private fun RowScope.NavItem(
         label = "navColor"
     )
 
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+
     NavigationBarItem(
         selected = isSelected,
-        onClick = onClick,
+        onClick = {
+            haptics.performHapticFeedback()
+            onClick()
+        },
         icon = {
             Icon(
                 imageVector = icon,

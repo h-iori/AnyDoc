@@ -35,6 +35,7 @@ fun FileViewerScreen(
 ) {
     val spacing = rememberAppSpacing()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -43,14 +44,17 @@ fun FileViewerScreen(
             LargeTopAppBar(
                 title = { Text(fileName, maxLines = 1) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = {
+                        haptics.performHapticFeedback()
+                        onBack()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { }) { Icon(Icons.Default.Search, contentDescription = "Search in doc") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.Share, contentDescription = "Share") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+                    IconButton(onClick = { haptics.performHapticFeedback() }) { Icon(Icons.Default.Search, contentDescription = "Search in doc") }
+                    IconButton(onClick = { haptics.performHapticFeedback() }) { Icon(Icons.Default.Share, contentDescription = "Share") }
+                    IconButton(onClick = { haptics.performHapticFeedback() }) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
                 },
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -61,7 +65,7 @@ fun FileViewerScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { },
+                onClick = { haptics.performHapticFeedback() },
                 containerColor = AppColors.BrandStrong,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer
             ) {

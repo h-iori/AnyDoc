@@ -38,11 +38,16 @@ fun FilterChip(
         label = "chipBorder"
     )
 
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+
     Box(
         modifier = modifier
             .background(bgColor.value, PillShape)
             .border(width = 1.dp, color = borderColor.value, shape = PillShape)
-            .clickable(role = Role.Tab, onClick = onClick)
+            .clickable(role = Role.Tab, onClick = {
+                haptics.performHapticFeedback()
+                onClick()
+            })
             .padding(horizontal = spacing.cardPadding, vertical = spacing.itemGap)
     ) {
         Text(
