@@ -35,6 +35,7 @@ import com.ioristudios.anydoc.model.DummyRecentFiles
 import com.ioristudios.anydoc.ui.components.BottomNavBar
 import com.ioristudios.anydoc.ui.components.FileListItem
 import com.ioristudios.anydoc.ui.components.FileTypeCard
+import com.ioristudios.anydoc.ui.components.SelectionTopAppBar
 import com.ioristudios.anydoc.ui.components.TopAppBar
 import com.ioristudios.anydoc.ui.theme.AppColors
 import com.ioristudios.anydoc.ui.theme.AppMotion
@@ -49,11 +50,40 @@ fun HomeScreen(
 ) {
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedItemIds by remember { mutableStateOf(setOf<String>()) }
+    
     LaunchedEffect(Unit) { contentVisible = true }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { TopAppBar(onMenuClick = onMenuClick) },
+        topBar = {
+            if (isSelectionMode) {
+                SelectionTopAppBar(
+                    selectedCount = selectedItemIds.size,
+                    totalCount = DummyRecentFiles.size,
+                    onSelectAllChange = { selectAll ->
+                        selectedItemIds = if (selectAll) {
+                            DummyRecentFiles.map { it.id }.toSet()
+                        } else {
+                            emptySet()
+                        }
+                    },
+                    onShare = { /* Dummy action */ },
+                    onDelete = {
+                        // Dummy action: Deselect all and exit mode
+                        selectedItemIds = emptySet()
+                        isSelectionMode = false
+                    },
+                    onCloseSelection = {
+                        selectedItemIds = emptySet()
+                        isSelectionMode = false
+                    }
+                )
+            } else {
+                TopAppBar(onMenuClick = onMenuClick)
+            }
+        },
         bottomBar = { BottomNavBar("home", onNavigate) }
     ) { paddingValues ->
 
@@ -105,6 +135,19 @@ fun HomeScreen(
                 FileListItem(
                     fileItem = file,
                     index = index,
+                    isSelectionMode = isSelectionMode,
+                    isSelected = selectedItemIds.contains(file.id),
+                    onSelectionChange = { selected ->
+                        selectedItemIds = if (selected) {
+                            selectedItemIds + file.id
+                        } else {
+                            selectedItemIds - file.id
+                        }
+                    },
+                    onLongClick = {
+                        isSelectionMode = true
+                        selectedItemIds = selectedItemIds + file.id
+                    },
                     onClick = { onOpenFile(file.name) }
                 )
             }

@@ -32,6 +32,7 @@ import com.ioristudios.anydoc.ui.components.BottomNavBar
 import com.ioristudios.anydoc.ui.components.FileListItem
 import com.ioristudios.anydoc.ui.components.FilterChip
 import com.ioristudios.anydoc.ui.components.SearchBar
+import com.ioristudios.anydoc.ui.components.SelectionTopAppBar
 import com.ioristudios.anydoc.ui.theme.AppColors
 import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.ui.theme.neonGlow
@@ -49,10 +50,38 @@ fun SearchScreen(
     val filters = listOf("All", "PDF", "Word", "Excel", "PPT", "TXT", "Code")
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedItemIds by remember { mutableStateOf(setOf<String>()) }
+    
     LaunchedEffect(Unit) { contentVisible = true }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            if (isSelectionMode) {
+                SelectionTopAppBar(
+                    selectedCount = selectedItemIds.size,
+                    totalCount = DummySearchFiles.size,
+                    onSelectAllChange = { selectAll ->
+                        selectedItemIds = if (selectAll) {
+                            DummySearchFiles.map { it.id }.toSet()
+                        } else {
+                            emptySet()
+                        }
+                    },
+                    onShare = { /* Dummy action */ },
+                    onDelete = {
+                        // Dummy action: Deselect all and exit mode
+                        selectedItemIds = emptySet()
+                        isSelectionMode = false
+                    },
+                    onCloseSelection = {
+                        selectedItemIds = emptySet()
+                        isSelectionMode = false
+                    }
+                )
+            }
+        },
         bottomBar = { BottomNavBar("search", onNavigate) }
     ) { paddingValues ->
         LazyColumn(
@@ -117,6 +146,19 @@ fun SearchScreen(
                     FileListItem(
                         fileItem = file,
                         index = index,
+                        isSelectionMode = isSelectionMode,
+                        isSelected = selectedItemIds.contains(file.id),
+                        onSelectionChange = { selected ->
+                            selectedItemIds = if (selected) {
+                                selectedItemIds + file.id
+                            } else {
+                                selectedItemIds - file.id
+                            }
+                        },
+                        onLongClick = {
+                            isSelectionMode = true
+                            selectedItemIds = selectedItemIds + file.id
+                        },
                         onClick = { onOpenFile(file.name) }
                     )
                 }

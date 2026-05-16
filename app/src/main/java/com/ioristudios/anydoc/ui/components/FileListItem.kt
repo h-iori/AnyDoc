@@ -4,6 +4,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,11 +49,16 @@ import com.ioristudios.anydoc.ui.theme.rememberAppSizes
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FileListItem(
     fileItem: FileItem,
     index: Int = 0,
     modifier: Modifier = Modifier,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionChange: ((Boolean) -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null
 ) {
     val spacing = rememberAppSpacing()
@@ -89,13 +96,48 @@ fun FileListItem(
             }
             .background(AppColors.Surface, RoundedCornerShape(14.dp))
             .border(1.dp, visual.borderColor, RoundedCornerShape(14.dp))
-            .then(if (onClick != null) Modifier.clickable { 
-                haptics.performHapticFeedback()
-                onClick() 
-            } else Modifier)
+            .then(
+                if (onClick != null || onLongClick != null) {
+                    Modifier.combinedClickable(
+                        onClick = {
+                            if (isSelectionMode) {
+                                haptics.performHapticFeedback()
+                                onSelectionChange?.invoke(!isSelected)
+                            } else {
+                                onClick?.let {
+                                    haptics.performHapticFeedback()
+                                    it()
+                                }
+                            }
+                        },
+                        onLongClick = {
+                            onLongClick?.let {
+                                haptics.performHapticFeedback()
+                                it()
+                            }
+                        }
+                    )
+                } else Modifier
+            )
             .padding(horizontal = spacing.cardPadding, vertical = spacing.itemGap),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectionMode) {
+            androidx.compose.material3.Checkbox(
+                checked = isSelected,
+                onCheckedChange = { 
+                    haptics.performHapticFeedback()
+                    onSelectionChange?.invoke(it) 
+                },
+                colors = androidx.compose.material3.CheckboxDefaults.colors(
+                    checkedColor = AppColors.BrandStrong,
+                    uncheckedColor = Color.White.copy(alpha = 0.5f),
+                    checkmarkColor = Color.White
+                )
+            )
+            Spacer(modifier = Modifier.size(spacing.itemGap))
+        }
+
         androidx.compose.foundation.Image(
             painter = painterResource(id = visual.iconRes),
             contentDescription = visual.label,
