@@ -1,3 +1,5 @@
 /.gradle
 app/build
 /build
+/.swarm
+ruvector.db

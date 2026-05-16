@@ -1,59 +1,96 @@
 package com.ioristudios.anydoc.ui.components
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.DataObject
-import androidx.compose.material.icons.filled.Dataset
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.FolderZip
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Slideshow
-import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.TextSnippet
+import androidx.annotation.DrawableRes
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import com.ioristudios.anydoc.R
 import com.ioristudios.anydoc.ui.theme.AppColors
 
 data class FileVisualSpec(
-    val icon: ImageVector,
-    val tint: Color,
+    @DrawableRes val iconRes: Int,
+    val iconTint: Color,
+    val containerColor: Color,
+    val borderColor: Color,
+    val glowColor: Color,
+    val accentColor: Color,
     val label: String
 )
 
 object FileTypeIconRegistry {
     fun resolveFileVisual(fileName: String, mimeType: String? = null): FileVisualSpec {
-        val extension = fileName.substringAfterLast('.', missingDelimiterValue = fileName)
-            .lowercase()
-            .trim()
+        val cleanName = fileName.trim().lowercase()
+        val extension = cleanName.substringAfterLast('.', missingDelimiterValue = "")
+        val mime = mimeType?.lowercase()?.trim().orEmpty()
 
         val normalized = when {
-            extension.isNotBlank() && extension != fileName.lowercase() -> extension
-            mimeType?.contains("pdf") == true -> "pdf"
-            mimeType?.contains("word") == true -> "docx"
-            mimeType?.contains("sheet") == true -> "xlsx"
-            mimeType?.contains("presentation") == true -> "pptx"
-            mimeType?.contains("image") == true -> "png"
-            else -> extension
+            cleanName.endsWith(".folder") || cleanName == "folder" -> "folder"
+            extension.isNotBlank() -> extension
+            "pdf" in mime -> "pdf"
+            "word" in mime || "document" in mime -> "docx"
+            "excel" in mime || "sheet" in mime || "csv" in mime -> "xlsx"
+            "powerpoint" in mime || "presentation" in mime -> "pptx"
+            "text" in mime -> "txt"
+            "json" in mime || "xml" in mime || "javascript" in mime || "kotlin" in mime -> "code"
+            else -> "file"
         }
 
         return when (normalized) {
-            "pdf" -> FileVisualSpec(Icons.Default.PictureAsPdf, AppColors.Danger, "PDF")
-            "doc", "docx", "rtf" -> FileVisualSpec(Icons.Default.Description, AppColors.Info, "Word")
-            "xls", "xlsx", "csv" -> FileVisualSpec(Icons.Default.TableChart, AppColors.Success, "Spreadsheet")
-            "ppt", "pptx" -> FileVisualSpec(Icons.Default.Slideshow, AppColors.Warning, "Presentation")
-            "txt", "md" -> FileVisualSpec(Icons.Default.TextSnippet, AppColors.BorderStrong, "Text")
-            "json" -> FileVisualSpec(Icons.Default.DataObject, AppColors.Info, "JSON")
-            "xml" -> FileVisualSpec(Icons.Default.Dataset, AppColors.Info, "XML")
-            "html" -> FileVisualSpec(Icons.Default.Language, AppColors.Brand, "HTML")
-            "js", "kt", "java" -> FileVisualSpec(Icons.Default.Code, AppColors.BrandStrong, "Code")
-            "png", "jpg", "jpeg", "webp" -> FileVisualSpec(Icons.Default.Image, AppColors.Info, "Image")
-            "zip", "rar", "7z" -> FileVisualSpec(Icons.Default.FolderZip, AppColors.Warning, "Archive")
-            "folder" -> FileVisualSpec(Icons.Default.Folder, AppColors.BorderStrong, "Folder")
-            else -> FileVisualSpec(Icons.AutoMirrored.Filled.InsertDriveFile, AppColors.BorderStrong, "File")
+            "pdf" -> neonSpec(
+                iconRes = R.drawable.ic_pdf,
+                accent = Color(0xFFFF3366),
+                label = "PDF"
+            )
+            "doc", "docx", "rtf" -> neonSpec(
+                iconRes = R.drawable.ic_word,
+                accent = Color(0xFF36A3FF),
+                label = "Word"
+            )
+            "xls", "xlsx", "csv" -> neonSpec(
+                iconRes = R.drawable.ic_excel,
+                accent = Color(0xFF00FF88),
+                label = "Excel"
+            )
+            "ppt", "pptx" -> neonSpec(
+                iconRes = R.drawable.ic_ppt,
+                accent = Color(0xFFFFA133),
+                label = "PPT"
+            )
+            "txt", "md" -> neonSpec(
+                iconRes = R.drawable.ic_txt,
+                accent = Color(0xFFB0B3C8),
+                label = "Text"
+            )
+            "js", "kt", "java", "py", "ts", "tsx", "jsx", "c", "cpp", "h", "cs", "go", "rs", "swift", "php", "rb", "scala",
+            "json", "xml", "yaml", "yml", "toml", "ini", "gradle" -> neonSpec(
+                iconRes = R.drawable.ic_code,
+                accent = Color(0xFFBF66FF),
+                label = "Code"
+            )
+            "folder" -> neonSpec(
+                iconRes = R.drawable.ic_folder,
+                accent = Color(0xFFD4AF37),
+                label = "Folder"
+            )
+            else -> neonSpec(
+                iconRes = R.drawable.ic_txt,
+                accent = AppColors.BorderStrong,
+                label = "File"
+            )
         }
+    }
+
+    private fun neonSpec(
+        @DrawableRes iconRes: Int,
+        accent: Color,
+        label: String
+    ): FileVisualSpec {
+        return FileVisualSpec(
+            iconRes = iconRes,
+            iconTint = Color.White,
+            containerColor = accent.copy(alpha = 0.14f),
+            borderColor = accent.copy(alpha = 0.58f),
+            glowColor = accent.copy(alpha = 0.45f),
+            accentColor = accent,
+            label = label
+        )
     }
 }

@@ -35,22 +35,22 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    background = Color(0xFFF4F7FC),
-    surface = Color(0xFFFFFFFF),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF0F4FA),
-    surfaceContainer = Color(0xFFE8EFF9),
-    surfaceContainerHigh = Color(0xFFDCE7F6),
-    surfaceContainerHighest = Color(0xFFCCD9EE),
-    onSurface = Color(0xFF1A2638),
-    onSurfaceVariant = Color(0xFF455A78),
-    outline = Color(0xFF667FA3),
-    outlineVariant = Color(0xFFB0C0D7),
-    primary = Color(0xFF236AC4),
-    primaryContainer = Color(0xFF2D7DE0),
-    onPrimaryContainer = Color.White,
-    secondaryContainer = Color(0xFF39B883),
-    tertiaryContainer = Color(0xFFE8922D)
+    background = SurfaceDark,
+    surface = SurfaceDarkElevated,
+    surfaceContainerLowest = SurfaceDark,
+    surfaceContainerLow = SurfaceDarkElevated,
+    surfaceContainer = SurfaceDarkCard,
+    surfaceContainerHigh = SurfaceContainerHigh,
+    surfaceContainerHighest = SurfaceContainerHighest,
+    onSurface = CoreWhiteDim,
+    onSurfaceVariant = SecondaryText,
+    outline = Outline,
+    outlineVariant = OutlineVariant,
+    primary = NeonPurple,
+    primaryContainer = NeonPurpleGlow,
+    onPrimaryContainer = CoreWhite,
+    secondaryContainer = NeonGreen,
+    tertiaryContainer = NeonOrange
 )
 
 @Composable
@@ -82,12 +82,12 @@ fun AnyDocTheme(
 
 fun Modifier.neonGlow(
     color: Color,
-    radius: Dp = 8.dp,
-    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp)
+    radius: Dp = AppGlow.Md,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(12.dp)
 ) = this.shadow(
     elevation = radius,
     shape = shape,
-    ambientColor = color.copy(alpha = 0.28f),
-    spotColor = color.copy(alpha = 0.32f),
+    ambientColor = color.copy(alpha = AppGlow.SubtleAlpha),
+    spotColor = color.copy(alpha = AppGlow.StrongAlpha),
     clip = false
 )

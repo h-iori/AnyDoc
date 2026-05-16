@@ -1,5 +1,9 @@
 package com.ioristudios.anydoc.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,10 +25,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.ioristudios.anydoc.ui.components.DocumentPage
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.AppMotion
+import com.ioristudios.anydoc.ui.theme.neonGlow
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +47,8 @@ fun FileViewerScreen(
     val spacing = rememberAppSpacing()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+    var pageVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { pageVisible = true }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -58,8 +71,11 @@ fun FileViewerScreen(
                 },
                 scrollBehavior = scrollBehavior,
                 colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = AppColors.SurfaceBase,
-                    scrolledContainerColor = AppColors.Surface
+                    containerColor = AppColors.SurfaceBase.copy(alpha = 0.98f),
+                    scrolledContainerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f),
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = AppColors.BrandStrong,
+                    actionIconContentColor = AppColors.BrandStrong
                 )
             )
         },
@@ -67,7 +83,8 @@ fun FileViewerScreen(
             FloatingActionButton(
                 onClick = { haptics.performHapticFeedback() },
                 containerColor = AppColors.BrandStrong,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.neonGlow(color = AppColors.Brand.copy(alpha = 0.4f), radius = spacing.itemGap)
             ) {
                 Icon(Icons.Default.Edit, contentDescription = "Annotate")
             }
@@ -84,7 +101,23 @@ fun FileViewerScreen(
                 count = 3,
                 key = { it }
             ) { index ->
-                DocumentPage(isLoading = index == 0)
+                AnimatedVisibility(
+                    visible = pageVisible,
+                    enter = fadeIn(
+                        tween(
+                            durationMillis = AppMotion.Normal + (index * 40),
+                            easing = AppMotion.StandardEasing
+                        )
+                    ) + slideInVertically(
+                        initialOffsetY = { it / 6 },
+                        animationSpec = tween(
+                            durationMillis = AppMotion.Normal + (index * 40),
+                            easing = AppMotion.DecelerateEasing
+                        )
+                    )
+                ) {
+                    DocumentPage(isLoading = index == 0)
+                }
             }
         }
     }

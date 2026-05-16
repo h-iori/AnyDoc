@@ -12,11 +12,18 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.RowScope
-import com.ioristudios.anydoc.ui.theme.AppColors
 import com.ioristudios.anydoc.ui.theme.AppMotion
+
+private val NavSurface = Color(0xFF12121A)
+private val NavActive = Color(0xFFD455FF)
+private val NavInactive = Color(0xFF4A4A5E)
+private val NavLabelActive = Color(0xFFEEEEFF)
+private val NavIndicator = Color(0xFFBF00FF)
 
 @Composable
 fun BottomNavBar(
@@ -24,8 +31,9 @@ fun BottomNavBar(
     onNavigate: (String) -> Unit
 ) {
     NavigationBar(
-        containerColor = AppColors.SurfaceBase.copy(alpha = 0.98f),
-        tonalElevation = 4.dp
+        modifier = Modifier,
+        containerColor = NavSurface.copy(alpha = 0.96f),
+        tonalElevation = 0.dp
     ) {
         NavItem("Home", Icons.Default.Home, currentRoute == "home") { onNavigate("home") }
         NavItem("Search", Icons.Default.Search, currentRoute == "search") { onNavigate("search") }
@@ -41,9 +49,14 @@ private fun RowScope.NavItem(
     onClick: () -> Unit
 ) {
     val selectedColor = animateColorAsState(
-        targetValue = if (isSelected) AppColors.BrandStrong else AppColors.BorderStrong,
+        targetValue = if (isSelected) NavActive else NavInactive,
         animationSpec = tween(AppMotion.Normal, easing = AppMotion.StandardEasing),
         label = "navColor"
+    )
+    val labelColor = animateColorAsState(
+        targetValue = if (isSelected) NavLabelActive else NavInactive,
+        animationSpec = tween(AppMotion.Normal, easing = AppMotion.StandardEasing),
+        label = "navLabelColor"
     )
 
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
@@ -61,9 +74,9 @@ private fun RowScope.NavItem(
                 tint = selectedColor.value
             )
         },
-        label = { Text(text = label, color = selectedColor.value) },
+        label = { Text(text = label, color = labelColor.value) },
         colors = NavigationBarItemDefaults.colors(
-            indicatorColor = AppColors.Brand.copy(alpha = 0.16f)
+            indicatorColor = NavIndicator.copy(alpha = 0.22f)
         )
     )
 }

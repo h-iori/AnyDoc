@@ -2,6 +2,7 @@ package com.ioristudios.anydoc.ui.theme
 
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -12,7 +13,7 @@ import com.ioristudios.anydoc.ui.responsive.rememberAppWindowClass
 
 object AppColors {
     val Brand = Primary
-    val BrandStrong = PrimaryContainer
+    val BrandStrong = NeonPurpleLight
     val SurfaceBase = SurfaceContainerLowest
     val Surface = SurfaceContainer
     val SurfaceElevated = SurfaceContainerHigh
@@ -60,13 +61,21 @@ data class AppElevation(
 )
 
 object AppMotion {
-    const val Fast: Int = 120
-    const val Normal: Int = 240
-    const val Slow: Int = 420
+    const val Fast: Int = 300
+    const val Normal: Int = 340
+    const val Slow: Int = 400
 
-    val EmphasizedEasing: Easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
-    val StandardEasing: Easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+    val EmphasizedEasing: Easing = FastOutSlowInEasing
+    val StandardEasing: Easing = FastOutSlowInEasing
     val DecelerateEasing: Easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
+}
+
+object AppGlow {
+    const val SubtleAlpha: Float = 0.2f
+    const val StrongAlpha: Float = 0.45f
+    val Sm: Dp = 8.dp
+    val Md: Dp = 10.dp
+    val Lg: Dp = 12.dp
 }
 
 fun adaptiveDp(windowClass: AppWindowClass, compact: Dp, medium: Dp, expanded: Dp): Dp {
@@ -104,10 +113,10 @@ fun rememberAppSizes(): AppComponentSizes {
 }
 
 fun rememberAppRadii(): AppRadii = AppRadii(
-    xs = 6.dp,
-    sm = 10.dp,
-    md = 14.dp,
-    lg = 18.dp,
+    xs = 8.dp,
+    sm = 12.dp,
+    md = 16.dp,
+    lg = 24.dp,
     xl = 24.dp,
     pill = 999.dp
 )

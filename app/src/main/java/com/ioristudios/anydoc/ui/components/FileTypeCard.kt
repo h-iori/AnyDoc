@@ -16,9 +16,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.ioristudios.anydoc.ui.theme.AppColors
 import com.ioristudios.anydoc.ui.theme.rememberAppSizes
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
@@ -26,7 +27,6 @@ import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 fun FileTypeCard(
     title: String,
     fileNameForIcon: String,
-    accentColor: Color,
     modifier: Modifier = Modifier,
     horizontalAlignment: Alignment.Horizontal = Alignment.Start,
     onClick: (() -> Unit)? = null
@@ -44,35 +44,37 @@ fun FileTypeCard(
                 onClick() 
             } else Modifier),
         shape = MaterialTheme.shapes.medium,
-        color = AppColors.Surface,
+        color = visual.containerColor.copy(alpha = 0.35f),
         tonalElevation = 3.dp,
         shadowElevation = 2.dp
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.dp, AppColors.BorderSubtle, MaterialTheme.shapes.medium)
+                .border(1.dp, visual.borderColor, MaterialTheme.shapes.medium)
                 .padding(spacing.cardPadding),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = horizontalAlignment
         ) {
             Box(
                 modifier = Modifier
+                    .shadow(elevation = 10.dp, shape = MaterialTheme.shapes.small, ambientColor = visual.glowColor, spotColor = visual.glowColor)
                     .size(sizes.fileIconContainer)
-                    .background(accentColor.copy(alpha = 0.16f), MaterialTheme.shapes.small),
+                    .background(visual.containerColor, MaterialTheme.shapes.small)
+                    .border(1.dp, visual.borderColor, MaterialTheme.shapes.small),
                 contentAlignment = Alignment.Center
             ) {
                 androidx.compose.material3.Icon(
-                    imageVector = visual.icon,
+                    painter = painterResource(id = visual.iconRes),
                     contentDescription = title,
-                    tint = visual.tint,
+                    tint = Color.Unspecified,
                     modifier = Modifier.size(sizes.fileIcon)
                 )
             }
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = visual.accentColor
             )
         }
     }

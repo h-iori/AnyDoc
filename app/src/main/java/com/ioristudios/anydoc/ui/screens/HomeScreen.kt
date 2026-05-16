@@ -1,5 +1,9 @@
 package com.ioristudios.anydoc.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -14,22 +18,26 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import com.ioristudios.anydoc.model.DummyRecentFiles
 import com.ioristudios.anydoc.ui.components.BottomNavBar
 import com.ioristudios.anydoc.ui.components.FileListItem
 import com.ioristudios.anydoc.ui.components.FileTypeCard
 import com.ioristudios.anydoc.ui.components.TopAppBar
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 @Composable
@@ -40,6 +48,8 @@ fun HomeScreen(
     onMenuClick: () -> Unit = {}
 ) {
     val spacing = rememberAppSpacing()
+    var contentVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { contentVisible = true }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -55,7 +65,18 @@ fun HomeScreen(
             contentPadding = PaddingValues(top = spacing.itemGap, bottom = spacing.sectionGap),
             verticalArrangement = Arrangement.spacedBy(spacing.itemGap)
         ) {
-            item { FileTypeGrid(onSearchWithFilter) }
+            item {
+                AnimatedVisibility(
+                    visible = contentVisible,
+                    enter = fadeIn(tween(AppMotion.Normal, easing = AppMotion.StandardEasing)) +
+                        slideInVertically(
+                            initialOffsetY = { it / 4 },
+                            animationSpec = tween(AppMotion.Normal, easing = AppMotion.DecelerateEasing)
+                        )
+                ) {
+                    FileTypeGrid(onSearchWithFilter)
+                }
+            }
             item { Spacer(modifier = Modifier.size(spacing.sectionGap)) }
 
             item {
@@ -70,6 +91,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .weight(1f)
+                            .alpha(0.96f)
                             .padding(start = spacing.itemGap)
                     )
                 }
@@ -95,13 +117,13 @@ fun HomeScreen(
 private fun FileTypeGrid(onTypeClick: (String) -> Unit) {
     val spacing = rememberAppSpacing()
     val types = listOf(
-        Triple("All Files", "folder", AppColors.BrandStrong),
-        Triple("PDF", "sample.pdf", AppColors.Danger),
-        Triple("Word", "sample.docx", AppColors.Info),
-        Triple("Excel", "sample.xlsx", AppColors.Success),
-        Triple("PPT", "sample.pptx", AppColors.Warning),
-        Triple("TXT", "sample.txt", AppColors.BorderStrong),
-        Triple("Code", "sample.kt", AppColors.Brand)
+        Pair("All Files", "folder"),
+        Pair("PDF", "sample.pdf"),
+        Pair("Word", "sample.docx"),
+        Pair("Excel", "sample.xlsx"),
+        Pair("PPT", "sample.pptx"),
+        Pair("TXT", "sample.txt"),
+        Pair("Code", "sample.kt")
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
@@ -116,7 +138,6 @@ private fun FileTypeGrid(onTypeClick: (String) -> Unit) {
         FileTypeCard(
             title = allFiles.first,
             fileNameForIcon = allFiles.second,
-            accentColor = allFiles.third,
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             onClick = { onTypeClick("All") }
@@ -132,7 +153,6 @@ private fun FileTypeGrid(onTypeClick: (String) -> Unit) {
                 FileTypeCard(
                     title = entry.first,
                     fileNameForIcon = entry.second,
-                    accentColor = entry.third,
                     modifier = Modifier.fillMaxWidth(0.485f),
                     onClick = { onTypeClick(entry.first) }
                 )

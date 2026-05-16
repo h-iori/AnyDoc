@@ -25,7 +25,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.AppGlow
 import com.ioristudios.anydoc.ui.theme.AppMotion
+import com.ioristudios.anydoc.ui.theme.neonGlow
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 @Composable
@@ -34,6 +36,7 @@ fun DocumentPage(
     isLoading: Boolean = true
 ) {
     val spacing = rememberAppSpacing()
+    val pageShape = RoundedCornerShape(16.dp)
     val shimmer = rememberInfiniteTransition(label = "shimmer")
     val shimmerAlpha = shimmer.animateFloat(
         initialValue = 0.42f,
@@ -49,8 +52,21 @@ fun DocumentPage(
         modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f / 1.414f)
-            .background(AppColors.Surface, RoundedCornerShape(12.dp))
-            .border(1.dp, AppColors.BorderSubtle, RoundedCornerShape(12.dp))
+            .neonGlow(
+                color = AppColors.Brand.copy(alpha = AppGlow.SubtleAlpha),
+                radius = AppGlow.Md,
+                shape = pageShape
+            )
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        AppColors.Surface,
+                        AppColors.SurfaceElevated
+                    )
+                ),
+                pageShape
+            )
+            .border(1.dp, AppColors.BorderSubtle, pageShape)
             .padding(spacing.cardPadding)
     ) {
         if (isLoading) {
@@ -61,14 +77,14 @@ fun DocumentPage(
                             .weight(1f)
                             .height(22.dp)
                             .alpha(shimmerAlpha.value)
-                            .background(AppColors.SurfaceHighest, RoundedCornerShape(6.dp))
+                            .background(AppColors.SurfaceHighest, RoundedCornerShape(8.dp))
                     )
                     Box(
                         modifier = Modifier
                             .weight(0.35f)
                             .height(22.dp)
                             .alpha(shimmerAlpha.value)
-                            .background(AppColors.SurfaceHighest, RoundedCornerShape(6.dp))
+                            .background(AppColors.SurfaceHighest, RoundedCornerShape(8.dp))
                     )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -78,7 +94,7 @@ fun DocumentPage(
                             .fillMaxWidth()
                             .height(10.dp)
                             .alpha(shimmerAlpha.value)
-                            .background(AppColors.SurfaceElevated, RoundedCornerShape(4.dp))
+                            .background(AppColors.SurfaceElevated, RoundedCornerShape(6.dp))
                     )
                 }
             }
@@ -86,13 +102,22 @@ fun DocumentPage(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .neonGlow(
+                        color = AppColors.Brand.copy(alpha = 0.24f),
+                        radius = AppGlow.Sm,
+                        shape = pageShape
+                    )
                     .background(
                         Brush.verticalGradient(
-                            listOf(AppColors.Brand.copy(alpha = 0.06f), Color.Transparent)
+                            listOf(
+                                AppColors.Brand.copy(alpha = 0.16f),
+                                AppColors.Brand.copy(alpha = 0.06f),
+                                Color.Transparent
+                            )
                         ),
-                        RoundedCornerShape(12.dp)
+                        pageShape
                     )
-                    .border(1.dp, AppColors.BorderSubtle, RoundedCornerShape(12.dp))
+                    .border(1.dp, AppColors.BorderSubtle, pageShape)
             )
         }
     }

@@ -19,6 +19,10 @@ val JetBrainsMono = FontFamily(
     Font(R.font.jetbrains_mono_bold, FontWeight.Bold)
 )
 
+val Orbitron = FontFamily(
+    Font(R.font.orbitron, FontWeight.Normal)
+)
+
 val AppTypography = Typography(
     displayLarge = TextStyle(
         fontFamily = Inter,
@@ -45,17 +49,20 @@ val AppTypography = Typography(
     bodyLarge = TextStyle(
         fontFamily = Inter,
         fontWeight = FontWeight.Normal,
-        fontSize = 16.sp
+        fontSize = 16.sp,
+        letterSpacing = 0.5.sp
     ),
     bodyMedium = TextStyle(
         fontFamily = Inter,
         fontWeight = FontWeight.Normal,
-        fontSize = 14.sp
+        fontSize = 14.sp,
+        letterSpacing = 0.5.sp
     ),
     bodySmall = TextStyle(
         fontFamily = Inter,
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp
+        fontSize = 13.sp,
+        letterSpacing = 0.5.sp
     ),
     labelMedium = TextStyle(
         fontFamily = Inter,
@@ -72,8 +79,15 @@ val AppTypography = Typography(
 )
 
 val LogoTextStyle = TextStyle(
-    fontFamily = Inter,
-    fontWeight = FontWeight.ExtraBold,
+    fontFamily = Orbitron,
+    fontWeight = FontWeight.Bold,
     fontSize = 26.sp,
-    letterSpacing = 0.2.sp
+    letterSpacing = 0.sp
+)
+
+val BrandSubtextStyle = TextStyle(
+    fontFamily = Orbitron,
+    fontWeight = FontWeight.Normal,
+    fontSize = 11.sp,
+    letterSpacing = 0.6.sp
 )

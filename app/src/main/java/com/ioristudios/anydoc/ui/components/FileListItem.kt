@@ -33,7 +33,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ioristudios.anydoc.model.FileItem
@@ -84,7 +87,7 @@ fun FileListItem(
                 this.translationY = translationY
             }
             .background(AppColors.Surface, RoundedCornerShape(14.dp))
-            .border(1.dp, AppColors.BorderSubtle, RoundedCornerShape(14.dp))
+            .border(1.dp, visual.borderColor, RoundedCornerShape(14.dp))
             .then(if (onClick != null) Modifier.clickable { 
                 haptics.performHapticFeedback()
                 onClick() 
@@ -94,14 +97,16 @@ fun FileListItem(
     ) {
         Box(
             modifier = Modifier
+                .shadow(elevation = 10.dp, shape = MaterialTheme.shapes.small, ambientColor = visual.glowColor, spotColor = visual.glowColor)
                 .size(sizes.fileIconContainer)
-                .background(visual.tint.copy(alpha = 0.16f), MaterialTheme.shapes.small),
+                .background(visual.containerColor, MaterialTheme.shapes.small)
+                .border(1.dp, visual.borderColor, MaterialTheme.shapes.small),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = visual.icon,
+                painter = painterResource(id = visual.iconRes),
                 contentDescription = visual.label,
-                tint = visual.tint,
+                tint = Color.Unspecified,
                 modifier = Modifier.size(sizes.fileIcon)
             )
         }
@@ -115,7 +120,7 @@ fun FileListItem(
             Text(
                 text = fileItem.name,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = visual.accentColor.copy(alpha = 0.98f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

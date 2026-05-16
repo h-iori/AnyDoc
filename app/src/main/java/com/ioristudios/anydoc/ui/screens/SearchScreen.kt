@@ -2,6 +2,10 @@ package com.ioristudios.anydoc.ui.screens
 
 import kotlin.OptIn
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +33,8 @@ import com.ioristudios.anydoc.ui.components.FileListItem
 import com.ioristudios.anydoc.ui.components.FilterChip
 import com.ioristudios.anydoc.ui.components.SearchBar
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.AppMotion
+import com.ioristudios.anydoc.ui.theme.neonGlow
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -41,6 +48,8 @@ fun SearchScreen(
     var selectedFilter by remember { mutableStateOf(initialFilter) }
     val filters = listOf("All", "PDF", "Word", "Excel", "PPT", "TXT", "Code")
     val spacing = rememberAppSpacing()
+    var contentVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { contentVisible = true }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -58,6 +67,10 @@ fun SearchScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(AppColors.SurfaceBase.copy(alpha = 0.96f))
+                        .neonGlow(
+                            color = AppColors.Brand.copy(alpha = 0.15f),
+                            radius = spacing.itemGap
+                        )
                         .statusBarsPadding()
                         .padding(horizontal = spacing.screenPadding, vertical = spacing.itemGap),
                     verticalArrangement = Arrangement.spacedBy(spacing.itemGap)
@@ -79,15 +92,24 @@ fun SearchScreen(
             }
 
             item {
-                Text(
-                    text = "Matches Found (${DummySearchFiles.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(
-                        horizontal = spacing.screenPadding,
-                        vertical = spacing.itemGap
+                AnimatedVisibility(
+                    visible = contentVisible,
+                    enter = fadeIn(tween(AppMotion.Normal, easing = AppMotion.StandardEasing)) +
+                        slideInVertically(
+                            initialOffsetY = { it / 5 },
+                            animationSpec = tween(AppMotion.Normal, easing = AppMotion.DecelerateEasing)
+                        )
+                ) {
+                    Text(
+                        text = "Matches Found (${DummySearchFiles.size})",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(
+                            horizontal = spacing.screenPadding,
+                            vertical = spacing.itemGap
+                        )
                     )
-                )
+                }
             }
 
             items(
