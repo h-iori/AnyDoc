@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.DropdownMenu
@@ -132,7 +133,7 @@ fun FileListItem(
                 Icon(
                     imageVector = Icons.Default.MoreVert,
                     contentDescription = "More options",
-                    tint = AppColors.BorderStrong
+                    tint = Color.White
                 )
             }
             DropdownMenu(
@@ -140,6 +141,14 @@ fun FileListItem(
                 onDismissRequest = { menuExpanded = false },
                 modifier = Modifier.background(AppColors.SurfaceElevated)
             ) {
+                DropdownMenuItem(
+                    text = { Text("Details") },
+                    onClick = { 
+                        haptics.performHapticFeedback()
+                        menuExpanded = false 
+                    },
+                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) }
+                )
                 DropdownMenuItem(
                     text = { Text("Share") },
                     onClick = { 
