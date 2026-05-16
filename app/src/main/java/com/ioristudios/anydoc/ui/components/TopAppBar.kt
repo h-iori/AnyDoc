@@ -23,7 +23,8 @@ import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 @Composable
 fun TopAppBar(
     title: String = "AnyDoc",
-    subtitle: String = "Enterprise Document Workspace"
+    subtitle: String = "by IORI STUDIOS",
+    onMenuClick: () -> Unit = {}
 ) {
     val spacing = rememberAppSpacing()
     Row(
@@ -47,7 +48,7 @@ fun TopAppBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = { }) {
+        IconButton(onClick = onMenuClick) {
             Icon(
                 imageVector = Icons.Default.Menu,
                 contentDescription = "Menu",
@@ -56,3 +57,4 @@ fun TopAppBar(
         }
     }
 }
+

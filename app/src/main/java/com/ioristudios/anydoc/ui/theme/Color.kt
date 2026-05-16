@@ -29,6 +29,25 @@ val NeonGreen = Color(0xFF4FD8A4)
 val NeonOrange = Color(0xFFFFA94D)
 val NeonPurple = Color(0xFF7C8CFF)
 
+// About Screen Specific Colors
+val SurfaceDark = Color(0xFF0A0E14)
+val SurfaceDarkElevated = Color(0xFF121721)
+val SurfaceDarkCard = Color(0xFF161C27)
+val TextPrimary = Color(0xFFE2E8F0)
+val TextSecondary = Color(0xFF94A3B8)
+val TextMuted = Color(0xFF64748B)
+val NeonPurpleAbout = Color(0xFF8B5CF6)
+val NeonPurpleLight = Color(0xFFA78BFA)
+val NeonPurpleSubtle = Color(0xFF2D2159)
+val NeonPurpleGlow = Color(0xFF6366F1)
+val SuccessGreenAbout = Color(0xFF10B981)
+
+// Sidebar Custom Design Colors
+val SurfaceDarkSheet = Color(0xFF0F141C)
+val NeonPurpleFaint = Color(0xFF1E1E3F)
+
+
+
 fun getAccentForExtension(extension: String): Color {
     return when (extension.lowercase()) {
         "pdf" -> NeonRed

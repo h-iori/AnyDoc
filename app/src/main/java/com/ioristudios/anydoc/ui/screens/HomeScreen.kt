@@ -36,15 +36,17 @@ import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 fun HomeScreen(
     onNavigate: (String) -> Unit,
     onSearchWithFilter: (String) -> Unit,
-    onOpenFile: (String) -> Unit
+    onOpenFile: (String) -> Unit,
+    onMenuClick: () -> Unit = {}
 ) {
     val spacing = rememberAppSpacing()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { TopAppBar() },
+        topBar = { TopAppBar(onMenuClick = onMenuClick) },
         bottomBar = { BottomNavBar("home", onNavigate) }
     ) { paddingValues ->
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -70,8 +72,6 @@ fun HomeScreen(
                             .weight(1f)
                             .padding(start = spacing.itemGap)
                     )
-                    IconButton(onClick = { }) { Icon(Icons.Default.Sort, contentDescription = "Sort") }
-                    IconButton(onClick = { }) { Icon(Icons.Default.ViewList, contentDescription = "View") }
                 }
             }
 
