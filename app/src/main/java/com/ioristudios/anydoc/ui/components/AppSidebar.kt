@@ -1,4 +1,4 @@
-﻿package com.ioristudios.anydoc.ui.components
+package com.ioristudios.anydoc.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -96,7 +96,7 @@ fun AppSidebar(
                         radius = 11.dp,
                         shape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
                     ),
-                color = SidebarSurface,
+                color = MaterialTheme.colorScheme.background,
                 tonalElevation = 12.dp,
                 shape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp),
                 border = BorderStroke(

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -31,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.ioristudios.anydoc.ui.components.DocumentPage
 import com.ioristudios.anydoc.ui.theme.AppColors
@@ -75,7 +77,7 @@ fun FileViewerScreen(
                     scrolledContainerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f),
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                     navigationIconContentColor = AppColors.BrandStrong,
-                    actionIconContentColor = AppColors.BrandStrong
+                    actionIconContentColor = Color.White
                 )
             )
         },
@@ -84,6 +86,7 @@ fun FileViewerScreen(
                 onClick = { haptics.performHapticFeedback() },
                 containerColor = AppColors.BrandStrong,
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                shape = CircleShape,
                 modifier = Modifier.neonGlow(color = AppColors.Brand.copy(alpha = 0.4f), radius = spacing.itemGap)
             ) {
                 Icon(Icons.Default.Edit, contentDescription = "Annotate")

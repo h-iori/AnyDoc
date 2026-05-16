@@ -63,7 +63,7 @@ fun FilterChip(
             .neonGlow(
                 color = if (isSelected) AppColors.Brand.copy(alpha = AppGlow.StrongAlpha) else AppColors.Brand.copy(alpha = 0.12f),
                 radius = if (isSelected) AppGlow.Md else AppGlow.Sm,
-                shape = RoundedCornerShape(999.dp)
+                shape = PillShape
             )
             .clickable(role = Role.Tab, onClick = {
                 haptics.performHapticFeedback()

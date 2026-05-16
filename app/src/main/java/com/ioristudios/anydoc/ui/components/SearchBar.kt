@@ -71,9 +71,6 @@ fun SearchBar(
         leadingIcon = {
             Icon(Icons.Default.Search, contentDescription = "Search", tint = AppColors.BorderStrong)
         },
-        trailingIcon = {
-            Icon(Icons.Default.Mic, contentDescription = "Voice search", tint = AppColors.BorderStrong)
-        },
         shape = MaterialTheme.shapes.medium,
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = borderColor,

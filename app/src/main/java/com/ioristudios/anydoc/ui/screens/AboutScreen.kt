@@ -370,7 +370,7 @@ fun AboutScreen(onBack: () -> Unit) {
             }
 
             Text(
-                text = "Built independently with purpose",
+                text = "Built independently 💪 with purpose",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted,
                 textAlign = TextAlign.Center

@@ -67,10 +67,6 @@ fun SearchScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(AppColors.SurfaceBase.copy(alpha = 0.96f))
-                        .neonGlow(
-                            color = AppColors.Brand.copy(alpha = 0.15f),
-                            radius = spacing.itemGap
-                        )
                         .statusBarsPadding()
                         .padding(horizontal = spacing.screenPadding, vertical = spacing.itemGap),
                     verticalArrangement = Arrangement.spacedBy(spacing.itemGap)

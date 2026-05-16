@@ -67,7 +67,7 @@ object FileTypeIconRegistry {
             )
             "folder" -> neonSpec(
                 iconRes = R.drawable.ic_folder,
-                accent = Color(0xFFD4AF37),
+                accent = Color(0xFF6366F1),
                 label = "Folder"
             )
             else -> neonSpec(

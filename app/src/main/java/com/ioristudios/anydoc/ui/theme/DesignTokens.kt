@@ -94,7 +94,7 @@ fun rememberAppSpacing(): AppSpacing {
         sectionGap = adaptiveDp(wc, 20.dp, 24.dp, 28.dp),
         itemGap = adaptiveDp(wc, 10.dp, 12.dp, 14.dp),
         chipGap = adaptiveDp(wc, 8.dp, 10.dp, 12.dp),
-        cardPadding = adaptiveDp(wc, 14.dp, 16.dp, 20.dp)
+        cardPadding = adaptiveDp(wc, 12.dp, 14.dp, 18.dp)
     )
 }
 
@@ -105,7 +105,7 @@ fun rememberAppSizes(): AppComponentSizes {
         topBarHeight = adaptiveDp(wc, 64.dp, 72.dp, 80.dp),
         navBarHeight = adaptiveDp(wc, 72.dp, 76.dp, 80.dp),
         searchBarHeight = adaptiveDp(wc, 52.dp, 56.dp, 60.dp),
-        fileCardMinHeight = adaptiveDp(wc, 100.dp, 120.dp, 136.dp),
+        fileCardMinHeight = adaptiveDp(wc, 84.dp, 104.dp, 120.dp),
         fileRowMinHeight = adaptiveDp(wc, 72.dp, 80.dp, 88.dp),
         fileIconContainer = adaptiveDp(wc, 38.dp, 42.dp, 46.dp),
         fileIcon = adaptiveDp(wc, 20.dp, 22.dp, 24.dp)
