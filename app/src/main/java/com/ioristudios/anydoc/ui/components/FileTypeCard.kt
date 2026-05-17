@@ -21,6 +21,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import com.ioristudios.anydoc.ui.theme.rememberAppSizes
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
@@ -29,6 +31,7 @@ fun FileTypeCard(
     title: String,
     fileNameForIcon: String,
     modifier: Modifier = Modifier,
+    fileCount: Int? = null,
     horizontalAlignment: Alignment.Horizontal = Alignment.Start,
     onClick: (() -> Unit)? = null
 ) {
@@ -70,11 +73,19 @@ fun FileTypeCard(
                 verticalArrangement = Arrangement.Bottom,
                 horizontalAlignment = horizontalAlignment
             ) {
-                androidx.compose.foundation.layout.Spacer(modifier = Modifier.heightIn(min = 64.dp))
+                Spacer(modifier = Modifier.heightIn(min = 64.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     color = visual.accentColor
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (fileCount != null) {
+                        if (fileCount == 1) "1 file" else "$fileCount files"
+                    } else "Loading...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
         }
