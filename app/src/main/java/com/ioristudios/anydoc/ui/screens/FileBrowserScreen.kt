@@ -77,11 +77,12 @@ fun FileBrowserScreen(
     val spacing = rememberAppSpacing()
     val uiState by viewModel.uiState.collectAsState()
     val currentPath by viewModel.currentPath.collectAsState()
-    val breadcrumbs = viewModel.getBreadcrumbs()
+    val isAtRoot = currentPath == viewModel.rootPath
+    val breadcrumbs = remember(currentPath) { viewModel.getBreadcrumbs() }
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 
     // Handle system back button
-    BackHandler(enabled = !viewModel.isAtRoot()) {
+    BackHandler(enabled = !isAtRoot) {
         viewModel.navigateUp()
     }
 
@@ -90,7 +91,7 @@ fun FileBrowserScreen(
         topBar = {
             FileBrowserTopBar(
                 breadcrumbs = breadcrumbs,
-                isAtRoot = viewModel.isAtRoot(),
+                isAtRoot = isAtRoot,
                 onNavigateUp = { viewModel.navigateUp() },
                 onBreadcrumbClick = { path -> viewModel.navigateInto(path) }
             )

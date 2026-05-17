@@ -19,7 +19,7 @@ sealed class FileBrowserState {
 
 class FileBrowserViewModel : ViewModel() {
 
-    private val rootPath: String = Environment.getExternalStorageDirectory().absolutePath
+    val rootPath: String = Environment.getExternalStorageDirectory().absolutePath
 
     private val _currentPath = MutableStateFlow(rootPath)
     val currentPath: StateFlow<String> = _currentPath.asStateFlow()
