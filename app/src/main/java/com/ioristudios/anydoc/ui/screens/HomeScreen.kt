@@ -31,11 +31,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import com.ioristudios.anydoc.model.DummyRecentFiles
+import androidx.compose.ui.unit.dp
 import com.ioristudios.anydoc.ui.components.BottomNavBar
-import com.ioristudios.anydoc.ui.components.FileListItem
 import com.ioristudios.anydoc.ui.components.FileTypeCard
-import com.ioristudios.anydoc.ui.components.SelectionTopAppBar
 import com.ioristudios.anydoc.ui.components.TopAppBar
 import com.ioristudios.anydoc.ui.theme.AppColors
 import com.ioristudios.anydoc.ui.theme.AppMotion
@@ -50,39 +48,13 @@ fun HomeScreen(
 ) {
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }
-    var isSelectionMode by remember { mutableStateOf(false) }
-    var selectedItemIds by remember { mutableStateOf(setOf<String>()) }
-    
+
     LaunchedEffect(Unit) { contentVisible = true }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            if (isSelectionMode) {
-                SelectionTopAppBar(
-                    selectedCount = selectedItemIds.size,
-                    totalCount = DummyRecentFiles.size,
-                    onSelectAllChange = { selectAll ->
-                        selectedItemIds = if (selectAll) {
-                            DummyRecentFiles.map { it.id }.toSet()
-                        } else {
-                            emptySet()
-                        }
-                    },
-                    onShare = { /* Dummy action */ },
-                    onDelete = {
-                        // Dummy action: Deselect all and exit mode
-                        selectedItemIds = emptySet()
-                        isSelectionMode = false
-                    },
-                    onCloseSelection = {
-                        selectedItemIds = emptySet()
-                        isSelectionMode = false
-                    }
-                )
-            } else {
-                TopAppBar(onMenuClick = onMenuClick)
-            }
+            TopAppBar(onMenuClick = onMenuClick)
         },
         bottomBar = { BottomNavBar("home", onNavigate) }
     ) { paddingValues ->
@@ -127,28 +99,11 @@ fun HomeScreen(
                 }
             }
 
-            items(
-                count = DummyRecentFiles.size,
-                key = { index -> DummyRecentFiles[index].id }
-            ) { index ->
-                val file = DummyRecentFiles[index]
-                FileListItem(
-                    fileItem = file,
-                    index = index,
-                    isSelectionMode = isSelectionMode,
-                    isSelected = selectedItemIds.contains(file.id),
-                    onSelectionChange = { selected ->
-                        selectedItemIds = if (selected) {
-                            selectedItemIds + file.id
-                        } else {
-                            selectedItemIds - file.id
-                        }
-                    },
-                    onLongClick = {
-                        isSelectionMode = true
-                        selectedItemIds = selectedItemIds + file.id
-                    },
-                    onClick = { onOpenFile(file.name) }
+            item {
+                Text(
+                    text = "No recent documents found",
+                    modifier = Modifier.padding(top = 16.dp).alpha(0.6f),
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }

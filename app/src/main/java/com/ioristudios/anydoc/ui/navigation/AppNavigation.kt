@@ -19,7 +19,9 @@ import com.ioristudios.anydoc.ui.components.AppSidebar
 import com.ioristudios.anydoc.ui.screens.AboutScreen
 import com.ioristudios.anydoc.ui.screens.FileViewerScreen
 import com.ioristudios.anydoc.ui.screens.HomeScreen
+import com.ioristudios.anydoc.ui.screens.PermissionScreen
 import com.ioristudios.anydoc.ui.screens.SearchScreen
+import com.ioristudios.anydoc.util.PermissionManager
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
@@ -53,6 +55,8 @@ fun AppNavigation() {
         }
     }
 
+    val startDest = if (PermissionManager.hasStoragePermission(context)) "home" else "permission"
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -66,7 +70,14 @@ fun AppNavigation() {
                 )
             )
     ) {
-        NavHost(navController = navController, startDestination = "home") {
+        NavHost(navController = navController, startDestination = startDest) {
+            composable("permission") {
+                PermissionScreen(onPermissionGranted = {
+                    navController.navigate("home") {
+                        popUpTo("permission") { inclusive = true }
+                    }
+                })
+            }
             composable("home") {
                 HomeScreen(
                     onNavigate = navigate,

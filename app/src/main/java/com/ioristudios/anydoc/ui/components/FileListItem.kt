@@ -28,6 +28,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +50,7 @@ import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.ui.theme.rememberAppSizes
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -59,13 +62,16 @@ fun FileListItem(
     isSelected: Boolean = false,
     onSelectionChange: ((Boolean) -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null
 ) {
     val spacing = rememberAppSpacing()
     val sizes = rememberAppSizes()
     val visual = FileTypeIconRegistry.resolveFileVisual(fileItem.name)
     var visible by remember { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var showDetailsDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 
     LaunchedEffect(Unit) {
@@ -188,6 +194,7 @@ fun FileListItem(
                     onClick = { 
                         haptics.performHapticFeedback()
                         menuExpanded = false 
+                        showDetailsDialog = true
                     },
                     leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) }
                 )
@@ -204,10 +211,73 @@ fun FileListItem(
                     onClick = { 
                         haptics.performHapticFeedback()
                         menuExpanded = false 
+                        showDeleteDialog = true
                     },
                     leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = AppColors.Danger) }
                 )
             }
         }
+    }
+
+    if (showDetailsDialog) {
+        AlertDialog(
+            onDismissRequest = { showDetailsDialog = false },
+            title = { Text(text = "File Details", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text = "Name: ${fileItem.name}", style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "Type: ${fileItem.extension.uppercase()}", style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "Size: ${fileItem.size}", style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "Last Modified: ${fileItem.metadata}", style = MaterialTheme.typography.bodyMedium)
+                    Text(text = "Path: ${fileItem.path}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDetailsDialog = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = AppColors.SurfaceElevated,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text(text = "Delete File", style = MaterialTheme.typography.titleLarge, color = AppColors.Danger) },
+            text = {
+                Text(
+                    text = "Are you sure you want to permanently delete '${fileItem.name}'? This action cannot be undone.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        haptics.performHapticFeedback()
+                        showDeleteDialog = false
+                        onDelete?.invoke()
+                    }
+                ) {
+                    Text("Delete", color = AppColors.Danger)
+                }
+            },
+            dismissButton = {
+                val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+                TextButton(onClick = { 
+                    coroutineScope.launch {
+                        haptics.performHapticFeedback()
+                        kotlinx.coroutines.delay(100)
+                        haptics.performHapticFeedback()
+                    }
+                    showDeleteDialog = false 
+                }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+            containerColor = AppColors.SurfaceElevated
+        )
     }
 }
