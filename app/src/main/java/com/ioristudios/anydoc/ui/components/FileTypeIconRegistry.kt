@@ -54,13 +54,13 @@ object FileTypeIconRegistry {
                 accent = Color(0xFFFB923C),   // Orange-400
                 label = "PPT"
             )
-            "txt", "md", "log" -> neonSpec(
+            "txt" -> neonSpec(
                 iconRes = R.drawable.ic_txt,
                 accent = Color(0xFFA1A4B8),   // Tuned neutral
                 label = "Text"
             )
             "js", "kt", "java", "py", "ts", "tsx", "jsx", "c", "cpp", "h", "cs", "go", "rs", "swift", "php", "rb", "scala",
-            "json", "xml", "yaml", "yml", "toml", "ini", "gradle" -> neonSpec(
+            "json", "xml", "yaml", "yml", "toml", "ini", "gradle", "md", "log" -> neonSpec(
                 iconRes = R.drawable.ic_code,
                 accent = Color(0xFFA855F7),   // Purple-500
                 label = "Code"
