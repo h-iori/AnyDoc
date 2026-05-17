@@ -41,7 +41,6 @@ import kotlinx.coroutines.launch
 
 private val OrbitronFamily = FontFamily(Font(R.font.orbitron, FontWeight.Bold))
 private val NeonHeaderSurface = Color(0xFF0A0A0F)
-private val NeonPurple = Color(0xFFBF00FF)
 private val CoreWhite = Color(0xFFFFFFFF)
 private val CoreWhiteDim = Color(0xFFEEEEFF)
 

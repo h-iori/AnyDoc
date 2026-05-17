@@ -1,7 +1,13 @@
 package com.ioristudios.anydoc.ui.navigation
 
-import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,10 +23,12 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ioristudios.anydoc.ui.components.AppSidebar
 import com.ioristudios.anydoc.ui.screens.AboutScreen
+import com.ioristudios.anydoc.ui.screens.FileBrowserScreen
 import com.ioristudios.anydoc.ui.screens.FileViewerScreen
 import com.ioristudios.anydoc.ui.screens.HomeScreen
 import com.ioristudios.anydoc.ui.screens.PermissionScreen
 import com.ioristudios.anydoc.ui.screens.SearchScreen
+import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.util.PermissionManager
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
@@ -28,6 +36,36 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 
+// ── Transition helpers ──
+private const val NAV_DURATION = 200
+
+private fun navEnter(): EnterTransition =
+    fadeIn(tween(NAV_DURATION)) +
+        slideInHorizontally(
+            initialOffsetX = { it / 5 },
+            animationSpec = tween(NAV_DURATION)
+        )
+
+private fun navExit(): ExitTransition =
+    fadeOut(tween(NAV_DURATION)) +
+        slideOutHorizontally(
+            targetOffsetX = { -it / 5 },
+            animationSpec = tween(NAV_DURATION)
+        )
+
+private fun navPopEnter(): EnterTransition =
+    fadeIn(tween(NAV_DURATION)) +
+        slideInHorizontally(
+            initialOffsetX = { -it / 5 },
+            animationSpec = tween(NAV_DURATION)
+        )
+
+private fun navPopExit(): ExitTransition =
+    fadeOut(tween(NAV_DURATION)) +
+        slideOutHorizontally(
+            targetOffsetX = { it / 5 },
+            animationSpec = tween(NAV_DURATION)
+        )
 
 @Composable
 fun AppNavigation() {
@@ -35,22 +73,14 @@ fun AppNavigation() {
     val context = LocalContext.current
     var isSidebarVisible by remember { mutableStateOf(false) }
 
-    val navigate = androidx.compose.runtime.remember(navController) {
+    val navigate = remember(navController) {
         { route: String ->
-            if (route == "files") {
-                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "*/*"
-                    addCategory(Intent.CATEGORY_OPENABLE)
+            navController.navigate(route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
                 }
-                context.startActivity(Intent.createChooser(intent, "Open File"))
-            } else {
-                navController.navigate(route) {
-                    popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
-                    }
-                    launchSingleTop = true
-                    restoreState = true
-                }
+                launchSingleTop = true
+                restoreState = true
             }
         }
     }
@@ -70,7 +100,14 @@ fun AppNavigation() {
                 )
             )
     ) {
-        NavHost(navController = navController, startDestination = startDest) {
+        NavHost(
+            navController = navController,
+            startDestination = startDest,
+            enterTransition = { navEnter() },
+            exitTransition = { navExit() },
+            popEnterTransition = { navPopEnter() },
+            popExitTransition = { navPopExit() }
+        ) {
             composable("permission") {
                 PermissionScreen(onPermissionGranted = {
                     navController.navigate("home") {
@@ -97,6 +134,12 @@ fun AppNavigation() {
                 val filter = backStackEntry.arguments?.getString("filter") ?: "All"
                 SearchScreen(
                     initialFilter = filter,
+                    onNavigate = navigate,
+                    onOpenFile = { fileName -> navigate("fileViewer/${Uri.encode(fileName)}") }
+                )
+            }
+            composable("files") {
+                FileBrowserScreen(
                     onNavigate = navigate,
                     onOpenFile = { fileName -> navigate("fileViewer/${Uri.encode(fileName)}") }
                 )
@@ -128,6 +171,3 @@ fun AppNavigation() {
 
     }
 }
-
-
-

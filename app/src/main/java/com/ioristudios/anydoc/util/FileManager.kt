@@ -1,6 +1,7 @@
 package com.ioristudios.anydoc.util
 
 import android.os.Environment
+import com.ioristudios.anydoc.model.BrowseItem
 import com.ioristudios.anydoc.model.FileItem
 import java.io.File
 import java.text.SimpleDateFormat
@@ -10,9 +11,16 @@ import java.util.UUID
 
 object FileManager {
 
-    private val documentExtensions = setOf(
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf",
-        "md", "xml", "log", "html", "htm", "py", "kt", "java", "json", "csv", "cpp", "c", "h", "js", "css"
+    val documentExtensions = setOf(
+        // Documents
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv",
+        // Code & markup
+        "md", "xml", "log", "html", "htm", "py", "kt", "java", "json",
+        "cpp", "c", "h", "js", "css", "ts", "tsx", "jsx", "cs", "go",
+        "rs", "swift", "php", "rb", "scala", "yaml", "yml", "toml", "ini", "gradle",
+        // Additional
+        "sql", "sh", "bat", "ps1", "r", "lua", "dart", "vue", "svelte", "env",
+        "cfg", "conf", "properties", "makefile"
     )
 
     fun scanFiles(): List<FileItem> {
@@ -48,6 +56,74 @@ object FileManager {
         }
     }
 
+    /**
+     * Lists the immediate children of [directoryPath], returning only:
+     * - Non-hidden folders (excluding "Android" system folder)
+     * - Files whose extension is in [documentExtensions]
+     *
+     * Folders are sorted first (alphabetically), then files (alphabetically).
+     */
+    fun listDirectory(directoryPath: String): List<BrowseItem> {
+        val dir = File(directoryPath)
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+
+        val children = dir.listFiles() ?: return emptyList()
+        val items = mutableListOf<BrowseItem>()
+
+        for (child in children) {
+            if (child.name.startsWith(".")) continue // skip hidden
+
+            if (child.isDirectory) {
+                if (child.name == "Android") continue // skip system dir
+                val supportedCount = countSupportedItems(child)
+                items.add(
+                    BrowseItem(
+                        name = child.name,
+                        path = child.absolutePath,
+                        isDirectory = true,
+                        extension = "",
+                        size = "$supportedCount items",
+                        lastModified = formatDate(child.lastModified()),
+                        childCount = supportedCount
+                    )
+                )
+            } else {
+                val ext = child.extension.lowercase()
+                if (documentExtensions.contains(ext)) {
+                    items.add(
+                        BrowseItem(
+                            name = child.name,
+                            path = child.absolutePath,
+                            isDirectory = false,
+                            extension = ext,
+                            size = formatFileSize(child.length()),
+                            lastModified = formatDate(child.lastModified())
+                        )
+                    )
+                }
+            }
+        }
+
+        // Folders first (alphabetical), then files (alphabetical)
+        return items.sortedWith(
+            compareByDescending<BrowseItem> { it.isDirectory }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    /**
+     * Counts how many supported items (folders + matching files) exist
+     * as immediate children of [dir].
+     */
+    private fun countSupportedItems(dir: File): Int {
+        val children = dir.listFiles() ?: return 0
+        return children.count { child ->
+            if (child.name.startsWith(".")) false
+            else if (child.isDirectory) child.name != "Android"
+            else documentExtensions.contains(child.extension.lowercase())
+        }
+    }
+
     fun deleteFile(path: String): Boolean {
         val file = File(path)
         return if (file.exists()) {
@@ -69,3 +145,4 @@ object FileManager {
         return sdf.format(Date(timestamp))
     }
 }
+

@@ -36,38 +36,38 @@ object FileTypeIconRegistry {
         return when (normalized) {
             "pdf" -> neonSpec(
                 iconRes = R.drawable.ic_pdf,
-                accent = Color(0xFFFF3366),
+                accent = Color(0xFFF43F5E),   // Rose-500
                 label = "PDF"
             )
             "doc", "docx", "rtf" -> neonSpec(
                 iconRes = R.drawable.ic_word,
-                accent = Color(0xFF36A3FF),
+                accent = Color(0xFF22D3EE),   // Cyan-400
                 label = "Word"
             )
             "xls", "xlsx", "csv" -> neonSpec(
                 iconRes = R.drawable.ic_excel,
-                accent = Color(0xFF00FF88),
+                accent = Color(0xFF34D399),   // Emerald-400
                 label = "Excel"
             )
             "ppt", "pptx" -> neonSpec(
                 iconRes = R.drawable.ic_ppt,
-                accent = Color(0xFFFFA133),
+                accent = Color(0xFFFB923C),   // Orange-400
                 label = "PPT"
             )
-            "txt", "md" -> neonSpec(
+            "txt", "md", "log" -> neonSpec(
                 iconRes = R.drawable.ic_txt,
-                accent = Color(0xFFB0B3C8),
+                accent = Color(0xFFA1A4B8),   // Tuned neutral
                 label = "Text"
             )
             "js", "kt", "java", "py", "ts", "tsx", "jsx", "c", "cpp", "h", "cs", "go", "rs", "swift", "php", "rb", "scala",
             "json", "xml", "yaml", "yml", "toml", "ini", "gradle" -> neonSpec(
                 iconRes = R.drawable.ic_code,
-                accent = Color(0xFFBF66FF),
+                accent = Color(0xFFA855F7),   // Purple-500
                 label = "Code"
             )
             "folder" -> neonSpec(
                 iconRes = R.drawable.ic_folder,
-                accent = Color(0xFF6366F1),
+                accent = Color(0xFF818CF8),   // Indigo-400
                 label = "Folder"
             )
             else -> neonSpec(

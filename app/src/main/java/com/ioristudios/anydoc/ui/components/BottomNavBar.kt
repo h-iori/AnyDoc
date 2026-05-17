@@ -20,10 +20,10 @@ import androidx.compose.foundation.layout.RowScope
 import com.ioristudios.anydoc.ui.theme.AppMotion
 
 private val NavSurface = Color(0xFF12121A)
-private val NavActive = Color(0xFFD455FF)
+private val NavActive = Color(0xFFC084FC)     // NeonPurpleLight
 private val NavInactive = Color(0xFF4A4A5E)
 private val NavLabelActive = Color(0xFFEEEEFF)
-private val NavIndicator = Color(0xFFBF00FF)
+private val NavIndicator = Color(0xFFA855F7)  // NeonPurple
 
 @Composable
 fun BottomNavBar(

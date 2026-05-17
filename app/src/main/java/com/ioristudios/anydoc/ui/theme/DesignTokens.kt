@@ -61,9 +61,9 @@ data class AppElevation(
 )
 
 object AppMotion {
-    const val Fast: Int = 300
-    const val Normal: Int = 340
-    const val Slow: Int = 400
+    const val Fast: Int = 150
+    const val Normal: Int = 200
+    const val Slow: Int = 280
 
     val EmphasizedEasing: Easing = FastOutSlowInEasing
     val StandardEasing: Easing = FastOutSlowInEasing

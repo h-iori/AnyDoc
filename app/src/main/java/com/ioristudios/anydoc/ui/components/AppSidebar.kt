@@ -56,8 +56,8 @@ import com.ioristudios.anydoc.ui.theme.neonGlow
 private val OrbitronFamily = FontFamily(Font(R.font.orbitron, FontWeight.Bold))
 private val SidebarScrim = Color(0xCC050508)
 private val SidebarSurface = Color(0xFF12121A)
-private val SidebarEdge = Color(0xFFBF00FF)
-private val SidebarGlow = Color(0xFF9B30FF)
+private val SidebarEdge = Color(0xFFA855F7)    // Enterprise NeonPurple
+private val SidebarGlow = Color(0xFF7C3AED)    // Enterprise NeonPurpleGlow
 private val SidebarText = Color(0xFFEEEEFF)
 private val SidebarMuted = Color(0xFF7A7A8E)
 
@@ -195,7 +195,7 @@ private fun SidebarHeader() {
                 letterSpacing = 0.6.sp,
                 shadow = Shadow(color = SidebarGlow.copy(alpha = 0.6f), blurRadius = 9f)
             ),
-            color = Color(0xFFD455FF),
+            color = Color(0xFFC084FC),
             fontWeight = FontWeight.Medium
         )
     }

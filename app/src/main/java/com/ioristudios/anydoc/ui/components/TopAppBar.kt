@@ -27,15 +27,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ioristudios.anydoc.R
+import com.ioristudios.anydoc.ui.theme.CoreWhite
+import com.ioristudios.anydoc.ui.theme.CoreWhiteDim
+import com.ioristudios.anydoc.ui.theme.NeonPurple
+import com.ioristudios.anydoc.ui.theme.NeonPurpleGlow
+import com.ioristudios.anydoc.ui.theme.NeonPurpleLight
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 private val OrbitronFamily = FontFamily(Font(R.font.orbitron, FontWeight.Bold))
 private val NeonHeaderSurface = Color(0xFF0A0A0F)
-private val NeonPurple = Color(0xFFBF00FF)
-private val NeonPurpleGlow = Color(0xFF9B30FF)
-private val NeonPurpleLight = Color(0xFFD455FF)
-private val CoreWhite = Color(0xFFFFFFFF)
-private val CoreWhiteDim = Color(0xFFEEEEFF)
 
 @Composable
 fun TopAppBar(
