@@ -49,8 +49,21 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
+}
+
+configurations.all {
+    resolutionStrategy.force(
+        "org.jetbrains.kotlin:kotlin-stdlib:1.9.24",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24",
+        "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24",
+        "org.jetbrains.kotlin:kotlin-reflect:1.9.24"
+    )
 }
 
 dependencies {
@@ -74,6 +87,20 @@ dependencies {
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // File detection.
+    implementation("org.apache.tika:tika-core:2.9.2")
+
+    // DOCX/XLSX basic editing is implemented with a small OpenXML ZIP engine in
+    // DocumentFileIo. Apache POI is intentionally not bundled here because the
+    // Android build would carry a large unused JVM dependency surface.
+
+    // PDF rendering uses Android PdfRenderer. Jetpack PDF alpha18 currently requires
+    // AGP 8.9.1, compileSdk 36, and SDK extension 19, which this project does not have yet.
+
+    // Text/code editing uses a Compose fallback for this Kotlin 1.9 project.
+    // Sora Editor 0.24.4 currently pulls Kotlin 2.2 artifacts, which are not
+    // readable by the Kotlin 1.9 compiler configured here.
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")

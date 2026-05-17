@@ -11,9 +11,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val initialFilePath = intent?.data?.takeIf { it.scheme == "file" }?.path
         setContent {
             AnyDocTheme {
-                AppNavigation()
+                AppNavigation(initialFilePath = initialFilePath)
             }
         }
     }

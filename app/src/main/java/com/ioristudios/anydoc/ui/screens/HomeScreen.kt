@@ -152,7 +152,7 @@ fun HomeScreen(
                         isSelected = false,
                         onSelectionChange = {},
                         onLongClick = {},
-                        onClick = { onOpenFile(file.name) },
+                        onClick = { onOpenFile(file.path) },
                         onDelete = { viewModel.deleteFile(file.path) }
                     )
                 }

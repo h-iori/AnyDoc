@@ -176,7 +176,7 @@ fun FileBrowserScreen(
                                     if (item.isDirectory) {
                                         viewModel.navigateInto(item.path)
                                     } else {
-                                        onOpenFile(item.name)
+                                        onOpenFile(item.path)
                                     }
                                 }
                             )

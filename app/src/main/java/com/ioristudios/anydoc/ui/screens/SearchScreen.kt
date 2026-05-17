@@ -222,7 +222,7 @@ fun SearchScreen(
                                     isSelectionMode = true
                                     selectedItemIds = selectedItemIds + file.id
                                 },
-                                onClick = { onOpenFile(file.name) },
+                                onClick = { onOpenFile(file.path) },
                                 onDelete = { 
                                     viewModel.deleteFile(file.path)
                                     coroutineScope.launch {

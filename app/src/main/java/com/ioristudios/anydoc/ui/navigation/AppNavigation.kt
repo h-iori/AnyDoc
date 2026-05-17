@@ -31,6 +31,7 @@ import com.ioristudios.anydoc.ui.screens.SearchScreen
 import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.util.PermissionManager
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -68,7 +69,7 @@ private fun navPopExit(): ExitTransition =
         )
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(initialFilePath: String? = null) {
     val navController = rememberNavController()
     val context = LocalContext.current
     var isSidebarVisible by remember { mutableStateOf(false) }
@@ -85,7 +86,14 @@ fun AppNavigation() {
         }
     }
 
-    val startDest = if (PermissionManager.hasStoragePermission(context)) "home" else "permission"
+    val hasPermission = PermissionManager.hasStoragePermission(context)
+    val startDest = if (hasPermission) "home" else "permission"
+
+    LaunchedEffect(hasPermission, initialFilePath) {
+        if (hasPermission && !initialFilePath.isNullOrBlank()) {
+            navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}")
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -119,7 +127,7 @@ fun AppNavigation() {
                 HomeScreen(
                     onNavigate = navigate,
                     onSearchWithFilter = { filter -> navigate("search?filter=$filter") },
-                    onOpenFile = { fileName -> navigate("fileViewer/${Uri.encode(fileName)}") },
+                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") },
                     onMenuClick = { isSidebarVisible = true }
                 )
             }
@@ -135,22 +143,22 @@ fun AppNavigation() {
                 SearchScreen(
                     initialFilter = filter,
                     onNavigate = navigate,
-                    onOpenFile = { fileName -> navigate("fileViewer/${Uri.encode(fileName)}") }
+                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") }
                 )
             }
             composable("files") {
                 FileBrowserScreen(
                     onNavigate = navigate,
-                    onOpenFile = { fileName -> navigate("fileViewer/${Uri.encode(fileName)}") }
+                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") }
                 )
             }
             composable(
-                route = "fileViewer/{fileName}",
-                arguments = listOf(navArgument("fileName") { type = NavType.StringType })
+                route = "fileViewer?path={path}",
+                arguments = listOf(navArgument("path") { type = NavType.StringType })
             ) { backStackEntry ->
-                val fileName = Uri.decode(backStackEntry.arguments?.getString("fileName") ?: "Document")
+                val filePath = Uri.decode(backStackEntry.arguments?.getString("path") ?: "")
                 FileViewerScreen(
-                    fileName = fileName,
+                    filePath = filePath,
                     onBack = { navController.popBackStack() }
                 )
             }
