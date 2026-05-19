@@ -18,7 +18,8 @@ data class DocumentOpenRequest(
     val sizeBytes: Long,
     val lastModified: Long,
     val kind: DocumentKind,
-    val canEdit: Boolean
+    val canEdit: Boolean,
+    val originalUri: String? = null
 )
 
 data class SearchMatch(

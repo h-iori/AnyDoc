@@ -31,6 +31,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
@@ -42,7 +44,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -93,6 +97,7 @@ fun FileViewerScreen(
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    var isSearching by remember { mutableStateOf(false) }
 
     LaunchedEffect(filePath) {
         viewModel.open(filePath)
@@ -111,66 +116,136 @@ fun FileViewerScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             val ready = state as? DocumentViewerState.Ready
-            LargeTopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = ready?.request?.displayName
-                                ?: (state as? DocumentViewerState.Error)?.displayName
-                                ?: "Document",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+            if (isSearching && ready != null) {
+                TopAppBar(
+                    title = {
+                        OutlinedTextField(
+                            value = ready.searchQuery,
+                            onValueChange = { viewModel.updateSearch(it) },
+                            placeholder = { Text("Search inside document", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent
+                            ),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        ready?.let {
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            haptics.performHapticFeedback()
+                            viewModel.updateSearch("")
+                            isSearching = false
+                        }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Exit search", tint = AppColors.BrandStrong)
+                        }
+                    },
+                    actions = {
+                        if (ready.searchQuery.isNotEmpty()) {
+                            val label = if (ready.searchMatches.isEmpty()) {
+                                "0/0"
+                            } else {
+                                "${ready.activeMatch + 1}/${ready.searchMatches.size}"
+                            }
                             Text(
-                                text = "${it.request.extension.uppercase()} - ${it.request.mimeType}",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = label,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            IconButton(
+                                enabled = ready.searchMatches.isNotEmpty(),
+                                onClick = {
+                                    haptics.performHapticFeedback()
+                                    viewModel.prevMatch()
+                                }
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match", tint = if (ready.searchMatches.isNotEmpty()) Color.White else Color.Gray)
+                            }
+                            IconButton(
+                                enabled = ready.searchMatches.isNotEmpty(),
+                                onClick = {
+                                    haptics.performHapticFeedback()
+                                    viewModel.nextMatch()
+                                }
+                            ) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next match", tint = if (ready.searchMatches.isNotEmpty()) Color.White else Color.Gray)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f),
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = AppColors.BrandStrong,
+                        actionIconContentColor = Color.White
+                    )
+                )
+            } else {
+                LargeTopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = ready?.request?.displayName
+                                    ?: (state as? DocumentViewerState.Error)?.displayName
+                                    ?: "Document",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            ready?.let {
+                                Text(
+                                    text = "${it.request.extension.uppercase()} - ${it.request.mimeType}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        haptics.performHapticFeedback()
-                        onBack()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (ready?.isEditing == true) {
+                    },
+                    navigationIcon = {
                         IconButton(onClick = {
                             haptics.performHapticFeedback()
-                            viewModel.exitEditMode()
+                            onBack()
                         }) {
-                            Icon(Icons.Default.Close, contentDescription = "Cancel editing")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        if (ready?.isEditing == true) {
+                            IconButton(onClick = {
+                                haptics.performHapticFeedback()
+                                viewModel.exitEditMode()
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel editing")
+                            }
+                            IconButton(onClick = {
+                                haptics.performHapticFeedback()
+                                viewModel.save()
+                            }) {
+                                Icon(Icons.Default.Save, contentDescription = "Save")
+                            }
                         }
                         IconButton(onClick = {
                             haptics.performHapticFeedback()
-                            viewModel.save()
+                            isSearching = true
                         }) {
-                            Icon(Icons.Default.Save, contentDescription = "Save")
+                            Icon(Icons.Default.Search, contentDescription = "Search in document")
                         }
-                    }
-                    IconButton(onClick = {
-                        haptics.performHapticFeedback()
-                        coroutineScope.launch { snackbarHostState.showSnackbar("Use the search field below to find text in this document.") }
-                    }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search in document")
-                    }
-                },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = AppColors.SurfaceBase.copy(alpha = 0.98f),
-                    scrolledContainerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f),
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = AppColors.BrandStrong,
-                    actionIconContentColor = Color.White
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.largeTopAppBarColors(
+                        containerColor = AppColors.SurfaceBase.copy(alpha = 0.98f),
+                        scrolledContainerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f),
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = AppColors.BrandStrong,
+                        actionIconContentColor = Color.White
+                    )
                 )
-            )
+            }
         },
         floatingActionButton = {
             val ready = state as? DocumentViewerState.Ready
@@ -212,9 +287,6 @@ fun FileViewerScreen(
                     verticalArrangement = Arrangement.spacedBy(spacing.itemGap)
                 ) {
                     item {
-                        SearchPanel(current, viewModel::updateSearch, viewModel::nextMatch)
-                    }
-                    item {
                         when (val content = current.content) {
                             is DocumentContent.PdfContent -> PdfDocumentView(content.path)
                             is DocumentContent.TextContent -> TextDocumentView(current, viewModel::updateEditedText)
@@ -247,50 +319,6 @@ fun FileViewerScreen(
     }
 }
 
-@Composable
-private fun SearchPanel(
-    state: DocumentViewerState.Ready,
-    onQueryChange: (String) -> Unit,
-    onNext: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(AppColors.Surface, RoundedCornerShape(12.dp))
-            .border(1.dp, AppColors.BorderSubtle, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = state.searchQuery,
-                onValueChange = onQueryChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("Search inside document") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
-            )
-            IconButton(
-                enabled = state.searchMatches.isNotEmpty(),
-                onClick = onNext
-            ) {
-                Icon(Icons.Default.SkipNext, contentDescription = "Next match")
-            }
-        }
-        if (state.searchQuery.isNotBlank()) {
-            val label = if (state.searchMatches.isEmpty()) {
-                "No matches"
-            } else {
-                "${state.activeMatch + 1} of ${state.searchMatches.size}: ${state.searchMatches[state.activeMatch].preview}"
-            }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
 
 @Composable
 private fun TextDocumentView(

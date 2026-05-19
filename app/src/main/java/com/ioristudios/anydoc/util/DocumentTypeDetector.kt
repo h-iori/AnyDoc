@@ -14,7 +14,7 @@ object DocumentTypeDetector {
         "svelte", "env", "cfg", "conf", "properties", "makefile"
     )
 
-    fun detect(path: String): DocumentOpenRequest {
+    fun detect(path: String, originalUri: String? = null): DocumentOpenRequest {
         val file = File(path)
         val extension = file.extension.lowercase()
         val mimeType = detectMime(file, extension)
@@ -42,7 +42,8 @@ object DocumentTypeDetector {
             sizeBytes = file.length(),
             lastModified = file.lastModified(),
             kind = kind,
-            canEdit = canEdit
+            canEdit = canEdit,
+            originalUri = originalUri
         )
     }
 
