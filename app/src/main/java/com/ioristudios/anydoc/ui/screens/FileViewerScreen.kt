@@ -83,11 +83,17 @@ import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.app.Activity
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileViewerScreen(
     filePath: String,
+    isExternal: Boolean = false,
     onBack: () -> Unit,
     viewModel: DocumentViewerViewModel = viewModel()
 ) {
@@ -98,6 +104,27 @@ fun FileViewerScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     var isSearching by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    var backPressedOnce by remember { mutableStateOf(false) }
+
+    if (isExternal) {
+        BackHandler {
+            if (backPressedOnce) {
+                (context as? Activity)?.finishAndRemoveTask()
+            } else {
+                backPressedOnce = true
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        "Double tap on back to exit",
+                        duration = SnackbarDuration.Short
+                    )
+                    delay(2000)
+                    backPressedOnce = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(filePath) {
         viewModel.open(filePath)
@@ -209,7 +236,23 @@ fun FileViewerScreen(
                     navigationIcon = {
                         IconButton(onClick = {
                             haptics.performHapticFeedback()
-                            onBack()
+                            if (isExternal) {
+                                if (backPressedOnce) {
+                                    (context as? Activity)?.finishAndRemoveTask()
+                                } else {
+                                    backPressedOnce = true
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar(
+                                            "Double tap on back to exit",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        delay(2000)
+                                        backPressedOnce = false
+                                    }
+                                }
+                            } else {
+                                onBack()
+                            }
                         }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }

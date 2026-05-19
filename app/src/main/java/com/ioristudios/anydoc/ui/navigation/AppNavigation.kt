@@ -91,7 +91,7 @@ fun AppNavigation(initialFilePath: String? = null) {
 
     LaunchedEffect(hasPermission, initialFilePath) {
         if (hasPermission && !initialFilePath.isNullOrBlank()) {
-            navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}")
+            navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}&isExternal=true")
         }
     }
 
@@ -153,12 +153,20 @@ fun AppNavigation(initialFilePath: String? = null) {
                 )
             }
             composable(
-                route = "fileViewer?path={path}",
-                arguments = listOf(navArgument("path") { type = NavType.StringType })
+                route = "fileViewer?path={path}&isExternal={isExternal}",
+                arguments = listOf(
+                    navArgument("path") { type = NavType.StringType },
+                    navArgument("isExternal") { 
+                        type = NavType.BoolType
+                        defaultValue = false
+                    }
+                )
             ) { backStackEntry ->
                 val filePath = Uri.decode(backStackEntry.arguments?.getString("path") ?: "")
+                val isExternal = backStackEntry.arguments?.getBoolean("isExternal") ?: false
                 FileViewerScreen(
                     filePath = filePath,
+                    isExternal = isExternal,
                     onBack = { navController.popBackStack() }
                 )
             }
