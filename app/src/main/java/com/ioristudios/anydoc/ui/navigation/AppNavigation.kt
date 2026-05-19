@@ -127,7 +127,7 @@ fun AppNavigation(initialFilePath: String? = null) {
                 HomeScreen(
                     onNavigate = navigate,
                     onSearchWithFilter = { filter -> navigate("search?filter=$filter") },
-                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") },
+                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") },
                     onMenuClick = { isSidebarVisible = true }
                 )
             }
@@ -143,13 +143,13 @@ fun AppNavigation(initialFilePath: String? = null) {
                 SearchScreen(
                     initialFilter = filter,
                     onNavigate = navigate,
-                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") }
+                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") }
                 )
             }
             composable("files") {
                 FileBrowserScreen(
                     onNavigate = navigate,
-                    onOpenFile = { filePath -> navigate("fileViewer?path=${Uri.encode(filePath)}") }
+                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") }
                 )
             }
             composable(
