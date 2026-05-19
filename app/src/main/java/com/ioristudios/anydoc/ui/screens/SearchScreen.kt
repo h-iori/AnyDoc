@@ -60,6 +60,10 @@ fun SearchScreen(
 ) {
     var query by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(initialFilter) }
+    
+    LaunchedEffect(initialFilter) {
+        selectedFilter = initialFilter
+    }
     val filters = listOf("All", "PDF", "Word", "Excel", "PPT", "TXT", "Code")
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }

@@ -132,14 +132,14 @@ object FileManager {
         }
     }
 
-    private fun formatFileSize(size: Long): String {
+    fun formatFileSize(size: Long): String {
         if (size <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
         return String.format(Locale.getDefault(), "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
     }
 
-    private fun formatDate(timestamp: Long): String {
+    fun formatDate(timestamp: Long): String {
         val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
         return sdf.format(Date(timestamp))
     }

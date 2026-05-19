@@ -30,6 +30,8 @@ import com.ioristudios.anydoc.ui.screens.PermissionScreen
 import com.ioristudios.anydoc.ui.screens.SearchScreen
 import com.ioristudios.anydoc.ui.theme.AppMotion
 import com.ioristudios.anydoc.util.PermissionManager
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ioristudios.anydoc.viewmodel.FilesViewModel
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +75,7 @@ fun AppNavigation(initialFilePath: String? = null) {
     val navController = rememberNavController()
     val context = LocalContext.current
     var isSidebarVisible by remember { mutableStateOf(false) }
+    val viewModel: FilesViewModel = viewModel()
 
     val navigate = remember(navController) {
         { route: String ->
@@ -86,12 +89,18 @@ fun AppNavigation(initialFilePath: String? = null) {
         }
     }
 
+    val handleOpenFile = { filePath: String ->
+        viewModel.markFileAsOpened(filePath)
+        navController.navigate("fileViewer?path=${Uri.encode(filePath)}")
+    }
+
     val hasPermission = PermissionManager.hasStoragePermission(context)
     val startDest = if (hasPermission) "home" else "permission"
 
     LaunchedEffect(hasPermission, initialFilePath) {
         if (hasPermission && !initialFilePath.isNullOrBlank()) {
             navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}&isExternal=true")
+            viewModel.markFileAsOpened(initialFilePath)
         }
     }
 
@@ -127,7 +136,7 @@ fun AppNavigation(initialFilePath: String? = null) {
                 HomeScreen(
                     onNavigate = navigate,
                     onSearchWithFilter = { filter -> navigate("search?filter=$filter") },
-                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") },
+                    onOpenFile = handleOpenFile,
                     onMenuClick = { isSidebarVisible = true }
                 )
             }
@@ -143,13 +152,13 @@ fun AppNavigation(initialFilePath: String? = null) {
                 SearchScreen(
                     initialFilter = filter,
                     onNavigate = navigate,
-                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") }
+                    onOpenFile = handleOpenFile
                 )
             }
             composable("files") {
                 FileBrowserScreen(
                     onNavigate = navigate,
-                    onOpenFile = { filePath -> navController.navigate("fileViewer?path=${Uri.encode(filePath)}") }
+                    onOpenFile = handleOpenFile
                 )
             }
             composable(

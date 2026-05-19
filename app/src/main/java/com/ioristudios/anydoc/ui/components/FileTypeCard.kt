@@ -42,7 +42,7 @@ fun FileTypeCard(
 
     Surface(
         modifier = modifier
-            .heightIn(min = sizes.fileCardMinHeight)
+            .heightIn(min = 80.dp)
             .then(if (onClick != null) Modifier.clickable { 
                 haptics.performHapticFeedback()
                 onClick() 
@@ -69,14 +69,14 @@ fun FileTypeCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(spacing.cardPadding),
+                    .padding(12.dp),
                 verticalArrangement = Arrangement.Bottom,
                 horizontalAlignment = horizontalAlignment
             ) {
-                Spacer(modifier = Modifier.heightIn(min = 64.dp))
+                Spacer(modifier = Modifier.heightIn(min = 24.dp))
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     color = visual.accentColor
                 )
                 Spacer(modifier = Modifier.height(4.dp))

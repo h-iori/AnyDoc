@@ -56,6 +56,7 @@ fun HomeScreen(
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }
     val uiState by viewModel.uiState.collectAsState()
+    val recentFiles by viewModel.recentFiles.collectAsState()
 
     val allFiles = (uiState as? FilesState.Success)?.files ?: emptyList()
     val fileCounts = remember(allFiles, uiState) {
@@ -75,7 +76,6 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         contentVisible = true
-        viewModel.loadFiles()
     }
 
     Scaffold(
@@ -126,8 +126,7 @@ fun HomeScreen(
                 }
             }
 
-            val recentFiles = allFiles.take(5)
-            if (uiState is FilesState.Loading) {
+            if (uiState is FilesState.Loading && recentFiles.isEmpty()) {
                 item {
                     Text(
                         text = "Loading recent documents...",
@@ -196,17 +195,17 @@ private fun FileTypeGrid(
             onClick = { onTypeClick("All") }
         )
 
-        // Other Cards (2 per row)
+        // Other Cards (3 per row)
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(spacing.itemGap),
             verticalArrangement = Arrangement.spacedBy(spacing.itemGap),
-            maxItemsInEachRow = 2
+            maxItemsInEachRow = 3
         ) {
             types.drop(1).forEach { entry ->
                 FileTypeCard(
                     title = entry.first,
                     fileNameForIcon = entry.second,
-                    modifier = Modifier.fillMaxWidth(0.485f),
+                    modifier = Modifier.weight(1f),
                     fileCount = fileCounts?.get(entry.first),
                     onClick = { onTypeClick(entry.first) }
                 )
