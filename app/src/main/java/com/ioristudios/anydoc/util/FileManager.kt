@@ -34,8 +34,8 @@ object FileManager {
         val files = dir.listFiles() ?: return
         for (file in files) {
             if (file.isDirectory) {
-                // Ignore hidden directories and common cache dirs to speed up scan
-                if (!file.name.startsWith(".") && file.name != "Android") {
+                // Ignore hidden directories
+                if (!file.name.startsWith(".")) {
                     scanDirectory(file, resultList)
                 }
             } else {
@@ -58,7 +58,7 @@ object FileManager {
 
     /**
      * Lists the immediate children of [directoryPath], returning only:
-     * - Non-hidden folders (excluding "Android" system folder)
+     * - Non-hidden folders
      * - Files whose extension is in [documentExtensions]
      *
      * Folders are sorted first (alphabetically), then files (alphabetically).
@@ -74,7 +74,6 @@ object FileManager {
             if (child.name.startsWith(".")) continue // skip hidden
 
             if (child.isDirectory) {
-                if (child.name == "Android") continue // skip system dir
                 val supportedCount = countSupportedItems(child)
                 items.add(
                     BrowseItem(
@@ -119,7 +118,7 @@ object FileManager {
         val children = dir.listFiles() ?: return 0
         return children.count { child ->
             if (child.name.startsWith(".")) false
-            else if (child.isDirectory) child.name != "Android"
+            else if (child.isDirectory) true
             else documentExtensions.contains(child.extension.lowercase())
         }
     }
