@@ -54,6 +54,9 @@ android {
             excludes += "META-INF/NOTICE*"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
+        jniLibs {
+            keepDebugSymbols += "**/libdatastore_shared_counter.so"
+        }
     }
 }
 

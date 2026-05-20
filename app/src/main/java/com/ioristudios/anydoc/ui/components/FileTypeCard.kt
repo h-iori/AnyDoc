@@ -23,8 +23,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import com.ioristudios.anydoc.ui.theme.rememberAppSizes
-import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 
 @Composable
 fun FileTypeCard(
@@ -35,8 +33,6 @@ fun FileTypeCard(
     horizontalAlignment: Alignment.Horizontal = Alignment.Start,
     onClick: (() -> Unit)? = null
 ) {
-    val spacing = rememberAppSpacing()
-    val sizes = rememberAppSizes()
     val visual = FileTypeIconRegistry.resolveFileVisual(fileNameForIcon)
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
 

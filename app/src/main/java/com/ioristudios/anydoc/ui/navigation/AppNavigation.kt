@@ -77,11 +77,18 @@ fun AppNavigation(initialFilePath: String? = null) {
     var isSidebarVisible by remember { mutableStateOf(false) }
     val viewModel: FilesViewModel = viewModel()
 
-    val navigate = remember(navController) {
+    val navigate = remember(navController, context) {
         { route: String ->
+            val permissionGranted = PermissionManager.hasStoragePermission(context)
             navController.navigate(route) {
-                popUpTo(navController.graph.findStartDestination().id) {
-                    saveState = true
+                if (permissionGranted) {
+                    popUpTo("home") {
+                        saveState = true
+                    }
+                } else {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
                 }
                 launchSingleTop = true
                 restoreState = true
@@ -135,7 +142,22 @@ fun AppNavigation(initialFilePath: String? = null) {
             composable("home") {
                 HomeScreen(
                     onNavigate = navigate,
-                    onSearchWithFilter = { filter -> navigate("search?filter=$filter") },
+                    onSearchWithFilter = { filter ->
+                        val permissionGranted = PermissionManager.hasStoragePermission(context)
+                        navController.navigate("search?filter=$filter") {
+                            if (permissionGranted) {
+                                popUpTo("home") {
+                                    saveState = true
+                                }
+                            } else {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                            }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
+                    },
                     onOpenFile = handleOpenFile,
                     onMenuClick = { isSidebarVisible = true }
                 )
