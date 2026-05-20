@@ -24,14 +24,22 @@ data class DocumentOpenRequest(
 
 data class SearchMatch(
     val index: Int,
-    val preview: String
+    val preview: String,
+    val pageIndex: Int = 0    // For PDFs: which page (0-based) this match lives on
 )
 
 sealed class DocumentContent {
     data class TextContent(val text: String, val isCodeLike: Boolean) : DocumentContent()
     data class CsvContent(val rows: List<List<String>>) : DocumentContent()
     data class OfficeTextContent(val sections: List<String>) : DocumentContent()
-    data class PdfContent(val path: String) : DocumentContent()
+    data class PdfContent(
+        val path: String,
+        /**
+         * Extracted text for each page (index = page number - 1).
+         * Empty list when extraction has not been attempted yet.
+         */
+        val pageTexts: List<String> = emptyList()
+    ) : DocumentContent()
     data class UnsupportedContent(val message: String) : DocumentContent()
 }
 

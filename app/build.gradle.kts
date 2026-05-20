@@ -104,6 +104,9 @@ dependencies {
     // PDF rendering uses Android PdfRenderer. Jetpack PDF alpha18 currently requires
     // AGP 8.9.1, compileSdk 36, and SDK extension 19, which this project does not have yet.
 
+    // PDF text extraction for in-document search.
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
     // Text/code editing uses a Compose fallback for this Kotlin 1.9 project.
     // Sora Editor 0.24.4 currently pulls Kotlin 2.2 artifacts, which are not
     // readable by the Kotlin 1.9 compiler configured here.

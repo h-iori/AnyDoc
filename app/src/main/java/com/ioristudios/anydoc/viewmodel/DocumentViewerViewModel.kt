@@ -11,6 +11,7 @@ import com.ioristudios.anydoc.model.DocumentViewerState
 import com.ioristudios.anydoc.model.SearchMatch
 import com.ioristudios.anydoc.util.DocumentFileIo
 import com.ioristudios.anydoc.util.DocumentTypeDetector
+import com.ioristudios.anydoc.util.RecentFilesManager
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,21 +24,30 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private val _uiState = MutableStateFlow<DocumentViewerState>(DocumentViewerState.Loading)
     val uiState: StateFlow<DocumentViewerState> = _uiState.asStateFlow()
 
+    init {
+        // Initialize PDFBox resource loader so font/encoding tables are available.
+        runCatching {
+            val loaderClass = Class.forName("com.tom_roush.pdfbox.android.PDFBoxResourceLoader")
+            val initMethod = loaderClass.getMethod("init", android.content.Context::class.java)
+            initMethod.invoke(null, application.applicationContext)
+        }
+    }
+
     fun open(pathOrUri: String) {
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = DocumentViewerState.Loading
-            
+
             var targetPath = pathOrUri
             var originalUriString: String? = null
             var displayName: String? = null
-            
+
             if (pathOrUri.startsWith("content://") || pathOrUri.startsWith("file://")) {
                 val uri = Uri.parse(pathOrUri)
                 if (uri.scheme == "file") {
                     targetPath = uri.path ?: pathOrUri
                 } else if (uri.scheme == "content") {
                     originalUriString = pathOrUri
-                    
+
                     val resolvedPath = resolveExternalStorageUri(uri)
                     if (resolvedPath != null && File(resolvedPath).exists()) {
                         targetPath = resolvedPath
@@ -52,7 +62,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                             }
                         }
                         displayName = name
-                        
+
                         val tempFile = File(context.cacheDir, name)
                         val copyResult = runCatching {
                             context.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -85,7 +95,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             runCatching {
                 val request = DocumentTypeDetector.detect(targetPath, originalUriString)
                 val content = when (request.kind) {
-                    DocumentKind.Pdf -> DocumentContent.PdfContent(request.path)
+                    DocumentKind.Pdf -> {
+                        val pageTexts = extractPdfPageTexts(targetPath)
+                        DocumentContent.PdfContent(request.path, pageTexts)
+                    }
                     DocumentKind.Text -> DocumentContent.TextContent(
                         text = DocumentFileIo.readText(request.path),
                         isCodeLike = request.extension != "txt" && request.extension != "log"
@@ -117,6 +130,40 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 _uiState.value = DocumentViewerState.Error(displayName ?: file.name, error.localizedMessage ?: "Could not open document.")
             }
         }
+    }
+
+    /**
+     * Extracts text from each page of the PDF via PDFBox.
+     * Returns an empty list if PDFBox is unavailable or extraction fails.
+     */
+    private fun extractPdfPageTexts(path: String): List<String> {
+        return runCatching {
+            val pdDocumentClass = Class.forName("com.tom_roush.pdfbox.pdmodel.PDDocument")
+            val stripperClass = Class.forName("com.tom_roush.pdfbox.text.PDFTextStripper")
+
+            val loadMethod = pdDocumentClass.getMethod("load", File::class.java)
+            val document = loadMethod.invoke(null, File(path))
+
+            val getNumberOfPagesMethod = pdDocumentClass.getMethod("getNumberOfPages")
+            val pageCount = getNumberOfPagesMethod.invoke(document) as Int
+
+            val stripper = stripperClass.getDeclaredConstructor().newInstance()
+            val setStartPageMethod = stripperClass.getMethod("setStartPage", Int::class.java)
+            val setEndPageMethod = stripperClass.getMethod("setEndPage", Int::class.java)
+            val getTextMethod = stripperClass.getMethod("getText", pdDocumentClass)
+
+            val closeMethod = pdDocumentClass.getMethod("close")
+
+            val texts = mutableListOf<String>()
+            for (i in 1..pageCount) {
+                setStartPageMethod.invoke(stripper, i)
+                setEndPageMethod.invoke(stripper, i)
+                val text = getTextMethod.invoke(stripper, document) as String
+                texts += text
+            }
+            closeMethod.invoke(document)
+            texts
+        }.getOrElse { emptyList() }
     }
 
     fun enterEditMode() {
@@ -230,9 +277,47 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
+    /**
+     * Rename the current document on disk.
+     * Works for both local files and cached copies of content-URI documents.
+     */
+    fun renameFile(newBaseName: String) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        if (newBaseName.isBlank()) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val oldFile = File(current.request.path)
+            val newName = if (newBaseName.endsWith(".${current.request.extension}")) {
+                newBaseName
+            } else {
+                "$newBaseName.${current.request.extension}"
+            }
+            val newFile = File(oldFile.parent ?: return@launch, newName)
+
+            val succeeded = runCatching { oldFile.renameTo(newFile) }.getOrElse { false }
+
+            if (succeeded) {
+                // Update recent files list
+                runCatching {
+                    RecentFilesManager.removeRecentFile(context, oldFile.absolutePath)
+                    RecentFilesManager.addRecentFile(context, newFile.absolutePath)
+                }
+                // Reload with the new path so all state reflects the new name
+                _uiState.value = DocumentViewerState.Loading
+                open(newFile.absolutePath)
+            } else {
+                _uiState.value = current.copy(message = "Could not rename the file.")
+            }
+        }
+    }
+
     fun updateSearch(query: String) {
         val current = _uiState.value as? DocumentViewerState.Ready ?: return
-        val matches = if (query.isBlank()) emptyList() else findMatches(searchableText(current), query)
+        val matches = if (query.isBlank()) {
+            emptyList()
+        } else {
+            findMatchesForState(current, query)
+        }
         _uiState.value = current.copy(
             searchQuery = query,
             searchMatches = matches,
@@ -258,6 +343,8 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         _uiState.value = current.copy(message = null)
     }
 
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
     private fun initialEditableText(content: DocumentContent): String = when (content) {
         is DocumentContent.TextContent -> content.text
         is DocumentContent.OfficeTextContent -> content.sections.joinToString("\n\n")
@@ -265,15 +352,39 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         else -> ""
     }
 
-    private fun searchableText(state: DocumentViewerState.Ready): String = when (val content = state.content) {
-        is DocumentContent.TextContent -> if (state.isEditing) state.editedText else content.text
-        is DocumentContent.OfficeTextContent -> if (state.isEditing) state.editedText else content.sections.joinToString("\n")
-        is DocumentContent.CsvContent -> DocumentFileIo.flattenRows(if (state.isEditing) state.editedRows else content.rows)
-        is DocumentContent.PdfContent -> state.request.displayName
-        is DocumentContent.UnsupportedContent -> content.message
+    /**
+     * Dispatch to the right search strategy depending on content type.
+     * PDFs are searched per-page so we can tag each match with its page index.
+     */
+    private fun findMatchesForState(state: DocumentViewerState.Ready, query: String): List<SearchMatch> {
+        return when (val content = state.content) {
+            is DocumentContent.PdfContent -> {
+                if (content.pageTexts.isEmpty()) {
+                    // No text extracted – fall back to a single match on the name
+                    findMatches(state.request.displayName, query, pageIndex = 0)
+                } else {
+                    content.pageTexts.flatMapIndexed { pageIdx, pageText ->
+                        findMatches(pageText, query, pageIndex = pageIdx)
+                    }
+                }
+            }
+            is DocumentContent.TextContent -> {
+                val text = if (state.isEditing) state.editedText else content.text
+                findMatches(text, query, pageIndex = 0)
+            }
+            is DocumentContent.OfficeTextContent -> {
+                val text = if (state.isEditing) state.editedText else content.sections.joinToString("\n")
+                findMatches(text, query, pageIndex = 0)
+            }
+            is DocumentContent.CsvContent -> {
+                val text = DocumentFileIo.flattenRows(if (state.isEditing) state.editedRows else content.rows)
+                findMatches(text, query, pageIndex = 0)
+            }
+            is DocumentContent.UnsupportedContent -> findMatches(content.message, query, pageIndex = 0)
+        }
     }
 
-    private fun findMatches(text: String, query: String): List<SearchMatch> {
+    private fun findMatches(text: String, query: String, pageIndex: Int): List<SearchMatch> {
         val matches = mutableListOf<SearchMatch>()
         var start = 0
         while (true) {
@@ -281,7 +392,11 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             if (index < 0) break
             val previewStart = (index - 36).coerceAtLeast(0)
             val previewEnd = (index + query.length + 36).coerceAtMost(text.length)
-            matches += SearchMatch(index, text.substring(previewStart, previewEnd).replace('\n', ' '))
+            matches += SearchMatch(
+                index = index,
+                preview = text.substring(previewStart, previewEnd).replace('\n', ' '),
+                pageIndex = pageIndex
+            )
             start = index + query.length
         }
         return matches
@@ -290,7 +405,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private fun resolveExternalStorageUri(uri: Uri): String? {
         if (uri.authority != "com.android.externalstorage.documents") return null
         val path = uri.path ?: return null
-        
+
         val docIndex = path.indexOf("/document/")
         val documentId = if (docIndex != -1) {
             path.substring(docIndex + "/document/".length)
@@ -302,7 +417,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 return null
             }
         }
-        
+
         val decodedId = Uri.decode(documentId)
         val parts = decodedId.split(":", limit = 2)
         if (parts.size == 2) {
