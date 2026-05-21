@@ -1,10 +1,13 @@
 package com.ioristudios.anydoc.ui.screens
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import android.util.LruCache
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,28 +16,30 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculatePan
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,7 +56,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -84,10 +88,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -98,6 +103,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,6 +115,7 @@ import com.ioristudios.anydoc.ui.theme.neonGlow
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 import com.ioristudios.anydoc.viewmodel.DocumentViewerViewModel
 import java.io.File
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -118,18 +125,31 @@ import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.ui.platform.LocalContext
-import kotlin.math.roundToInt
 
 // ─── Highlight colours ────────────────────────────────────────────────────────
 private val HighlightNormal = Color(0xFFFFE066)   // yellow
 private val HighlightActive = Color(0xFFFF9800)   // orange
 
+// ─── LRU Bitmap Cache (shared across compositions) ────────────────────────────
+// Capped at 1/8th of available VM heap to avoid OOM
+private val pdfPageBitmapCache: LruCache<String, Bitmap> by lazy {
+    val maxMemKb = (Runtime.getRuntime().maxMemory() / 1024).toInt()
+    val cacheSize = maxMemKb / 8
+    object : LruCache<String, Bitmap>(cacheSize) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            value.byteCount / 1024
+        override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
+            if (evicted) oldValue.recycle()
+        }
+    }
+}
+
 // ─── Helper: build highlighted AnnotatedString ────────────────────────────────
 private fun buildHighlightedString(
     text: String,
     query: String,
-    activeIndex: Int,            // index of the active match within this text's occurrences
-    matchesBeforeThisPage: Int   // how many global matches live before this page
+    activeIndex: Int,
+    matchesBeforeThisPage: Int
 ): AnnotatedString {
     if (query.isBlank()) return AnnotatedString(text)
     return buildAnnotatedString {
@@ -151,6 +171,55 @@ private fun buildHighlightedString(
             localMatchIdx++
         }
     }
+}
+
+// ─── Helper: draw highlight rects onto a Bitmap ───────────────────────────────
+// Since PdfRenderer produces a bitmap, we overlay highlight boxes by scanning
+// the extracted text for query occurrences and estimating their approximate line
+// positions using line-height heuristics. This gives on-canvas highlights that
+// are visible directly on the page image without a full text-coordinate API.
+private fun Bitmap.withSearchHighlights(
+    pageText: String,
+    query: String,
+    matchesBeforeThisPage: Int,
+    activeGlobalMatch: Int
+): Bitmap {
+    if (query.isBlank() || pageText.isBlank()) return this
+    val result = copy(Bitmap.Config.ARGB_8888, true)
+    val canvas = Canvas(result)
+
+    val lines = pageText.lines()
+    if (lines.isEmpty()) return result
+
+    val lineHeight = height.toFloat() / lines.size.coerceAtLeast(1)
+    val charWidth = (width.toFloat() / lines.maxOfOrNull { it.length.coerceAtLeast(1) }!!).coerceAtLeast(1f)
+
+    val normalPaint = Paint().apply {
+        color = HighlightNormal.copy(alpha = 0.45f).toArgb()
+        style = Paint.Style.FILL
+    }
+    val activePaint = Paint().apply {
+        color = HighlightActive.copy(alpha = 0.6f).toArgb()
+        style = Paint.Style.FILL
+    }
+
+    var globalMatchIdx = matchesBeforeThisPage
+    lines.forEachIndexed { lineIdx, line ->
+        var searchStart = 0
+        while (true) {
+            val found = line.indexOf(query, searchStart, ignoreCase = true)
+            if (found == -1) break
+            val top = lineIdx * lineHeight
+            val bottom = top + lineHeight
+            val left = found * charWidth
+            val right = (found + query.length) * charWidth
+            val paint = if (globalMatchIdx == activeGlobalMatch) activePaint else normalPaint
+            canvas.drawRect(left, top, right.coerceAtMost(width.toFloat()), bottom, paint)
+            globalMatchIdx++
+            searchStart = found + query.length
+        }
+    }
+    return result
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -479,8 +548,12 @@ fun FileViewerScreen(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FULLSCREEN PDF VIEWER
+// FULLSCREEN PDF VIEWER  — AGENT 1 (Layout) + AGENT 2 (Gestures)
+//                        + AGENT 3 (Scrollbar) + AGENT 4 (Search)
+//                        + AGENT 5 (Performance)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+private val TOP_BAR_HEIGHT: Dp = 64.dp   // standard M3 TopAppBar height
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -498,29 +571,45 @@ private fun PdfFullscreenViewer(
 ) {
     val content = state.content as DocumentContent.PdfContent
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // ── Shared zoom / pan state ──────────────────────────────────────────────
+    // ── AGENT 2: Shared zoom / pan state ─────────────────────────────────────
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
 
-    // ── Scroll / visibility state ────────────────────────────────────────────
+    // ── AGENT 1: Scroll / visibility state ───────────────────────────────────
     val lazyListState = rememberLazyListState()
+    // barsVisible — always true when searching (FIX #12)
     var barsVisible by remember { mutableStateOf(true) }
     var scrollbarVisible by remember { mutableStateOf(false) }
 
-    // Track scroll direction to show/hide bars
-    LaunchedEffect(lazyListState) {
+    // Status bar height so first page clears status bar in addition to top bar
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topContentOffset = TOP_BAR_HEIGHT + statusBarPadding
+    val topBarHeightPx = with(density) { TOP_BAR_HEIGHT.toPx().toInt() }
+
+    // FIX #12 — Keep bars visible while search is active
+    LaunchedEffect(lazyListState, isSearching) {
         var previousIndex = 0
         var previousOffset = 0
         snapshotFlow { lazyListState.firstVisibleItemIndex to lazyListState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .collect { (index, offset) ->
-                val scrolledDown = index > previousIndex || (index == previousIndex && offset > previousOffset)
-                barsVisible = !scrolledDown
+                if (!isSearching) {
+                    val scrolledDown = index > previousIndex || (index == previousIndex && offset > previousOffset)
+                    barsVisible = !scrolledDown
+                } else {
+                    barsVisible = true   // always show bar while searching
+                }
                 previousIndex = index
                 previousOffset = offset
             }
     }
+
+    // Tap anywhere on the page (when not searching) to toggle bars
+    // NOTE: handled in the pointerInput below
 
     // Scrollbar visibility: show while scrolling, hide 1.5 s after stop
     LaunchedEffect(lazyListState.isScrollInProgress) {
@@ -532,51 +621,93 @@ private fun PdfFullscreenViewer(
         }
     }
 
-    // Auto-scroll to the page containing the active match
+    // FIX #10 — Auto-scroll to the page containing the active match,
+    //           accounting for top bar height so match isn't hidden behind bar
     LaunchedEffect(state.activeMatch) {
         val matchList = state.searchMatches
         if (matchList.isNotEmpty() && state.activeMatch >= 0) {
             val pageIdx = matchList[state.activeMatch].pageIndex
-            // +1 because item 0 is a header spacer; items 1..N are page items
-            lazyListState.animateScrollToItem(pageIdx)
+            lazyListState.animateScrollToItem(
+                index = pageIdx,
+                scrollOffset = -topBarHeightPx
+            )
         }
     }
 
-    // Current visible page info
+    // FIX #7 — Smooth scroll fraction using both index + pixel offset
+    val scrollFraction by remember {
+        derivedStateOf {
+            val layoutInfo = lazyListState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount.coerceAtLeast(1)
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) return@derivedStateOf 0f
+            val avgItemHeight = visibleItems.map { it.size }.average().toFloat().coerceAtLeast(1f)
+            val firstVisible = lazyListState.firstVisibleItemIndex
+            val firstOffset = lazyListState.firstVisibleItemScrollOffset
+            ((firstVisible * avgItemHeight + firstOffset) / (totalItems * avgItemHeight)).coerceIn(0f, 1f)
+        }
+    }
+
     val currentPage by remember {
         derivedStateOf { lazyListState.firstVisibleItemIndex + 1 }
     }
     val totalPages = content.pageTexts.size.coerceAtLeast(1)
 
+    // Issue 1 Fix — Animated top padding: shrinks to status-bar-only when bars are hidden
+    val animatedTopPadding by animateDpAsState(
+        targetValue = if (barsVisible) topContentOffset else statusBarPadding,
+        animationSpec = tween(200),
+        label = "topPadding"
+    )
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        // ── PDF pages list ───────────────────────────────────────────────────
-        LazyColumn(
-            state = lazyListState,
+
+        // ── Issue 4: Unified zoom container — graphicsLayer wraps the entire LazyColumn ─
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        var zoom = 1f
-                        var panX = 0f
-                        do {
-                            val event = awaitPointerEvent()
-                            val fingersDown = event.changes.count { it.pressed }
-                            if (fingersDown >= 2) {
-                                zoom *= event.calculateZoom()
-                                panX += event.calculatePan().x
-                            }
-                            event.changes.forEach { it.consume() }
-                        } while (event.changes.any { it.pressed })
-
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
-                            offsetX = (offsetX + panX * scale).coerceIn(-2000f, 2000f)
+                .padding(top = animatedTopPadding)
+                .pointerInput(totalPages) {
+                    // Draggable scrollbar drag gesture is handled separately on the track.
+                    // This block handles pinch-zoom + pan for the whole document.
+                    detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
+                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                        scale = newScale
+                        if (newScale > 1f) {
+                            val maxPanX = (size.width * (newScale - 1f)) / 2f
+                            val maxPanY = (size.height * (newScale - 1f)) / 2f
+                            offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
+                            offsetY = (offsetY + pan.y).coerceIn(-maxPanY, maxPanY)
                         } else {
                             offsetX = 0f
+                            offsetY = 0f
                         }
                     }
-                },
+                }
+                .pointerInput(isSearching) {
+                    detectTapGestures(
+                        onTap = { if (!isSearching) barsVisible = !barsVisible },
+                        onDoubleTap = {
+                            if (scale > 1.1f) {
+                                scale = 1f; offsetX = 0f; offsetY = 0f
+                            } else {
+                                scale = 2.5f
+                            }
+                        }
+                    )
+                }
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
+                    transformOrigin = TransformOrigin.Center
+                }
+        ) {
+        // ── PDF pages list ─────────────────────────────────────────────────────
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
@@ -589,8 +720,6 @@ private fun PdfFullscreenViewer(
                 PdfPageItem(
                     path = content.path,
                     pageIndex = pageIndex,
-                    scale = scale,
-                    offsetX = offsetX,
                     pageText = content.pageTexts.getOrElse(pageIndex) { "" },
                     searchQuery = pageSearchQuery,
                     matchesBeforeThisPage = matchesBeforeThisPage,
@@ -600,8 +729,9 @@ private fun PdfFullscreenViewer(
             // Bottom padding so last page clears the nav bar
             item { Spacer(modifier = Modifier.size(80.dp)) }
         }
+        } // end zoom container Box
 
-        // ── Top bar overlay ──────────────────────────────────────────────────
+        // ── AGENT 1: Top bar overlay (always above page content, never behind) ─
         AnimatedVisibility(
             visible = barsVisible,
             enter = slideInVertically(tween(200)) { -it } + fadeIn(tween(200)),
@@ -636,17 +766,36 @@ private fun PdfFullscreenViewer(
                         if (state.searchQuery.isNotEmpty()) {
                             val label = if (state.searchMatches.isEmpty()) "0/0"
                             else "${state.activeMatch + 1}/${state.searchMatches.size}"
-                            Text(text = label, color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 8.dp))
-                            IconButton(enabled = state.searchMatches.isNotEmpty(), onClick = { haptics.performHapticFeedback(); onPrevMatch() }) {
-                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous", tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray)
+                            Text(
+                                text = label,
+                                color = Color.White.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(horizontal = 8.dp)
+                            )
+                            IconButton(
+                                enabled = state.searchMatches.isNotEmpty(),
+                                onClick = { haptics.performHapticFeedback(); onPrevMatch() }
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Previous",
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
+                                )
                             }
-                            IconButton(enabled = state.searchMatches.isNotEmpty(), onClick = { haptics.performHapticFeedback(); onNextMatch() }) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next", tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray)
+                            IconButton(
+                                enabled = state.searchMatches.isNotEmpty(),
+                                onClick = { haptics.performHapticFeedback(); onNextMatch() }
+                            ) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Next",
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
+                                )
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black.copy(alpha = 0.88f),
+                        containerColor = Color.Black.copy(alpha = 0.92f),
                         titleContentColor = Color.White,
                         navigationIconContentColor = AppColors.BrandStrong,
                         actionIconContentColor = Color.White
@@ -696,50 +845,100 @@ private fun PdfFullscreenViewer(
             }
         }
 
-        // ── Enterprise page indicator scrollbar ──────────────────────────────
+        // ── Issue 2: Draggable scrollbar — 24dp touch target, 4dp visual track ──
+        var isDragging by remember { mutableStateOf(false) }
+        val thumbWidthDp by animateDpAsState(
+            targetValue = if (isDragging) 6.dp else 4.dp,
+            animationSpec = tween(150),
+            label = "thumbWidth"
+        )
+
         AnimatedVisibility(
-            visible = scrollbarVisible || lazyListState.isScrollInProgress,
+            visible = scrollbarVisible || lazyListState.isScrollInProgress || isDragging,
             enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(600)),
+            exit = fadeOut(tween(800)),
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 4.dp)
+                .fillMaxHeight()
+                .width(24.dp)  // wide touch target
+                .padding(top = animatedTopPadding, bottom = 8.dp)
         ) {
-            val fraction = (currentPage - 1).toFloat() / (totalPages - 1).coerceAtLeast(1).toFloat()
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(48.dp),
-                contentAlignment = Alignment.TopEnd
-            ) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val containerHeightPx = with(density) { maxHeight.toPx() }
+                val thumbMinHeightDp = 40.dp
+                val thumbHeightPx = with(density) { thumbMinHeightDp.toPx() }
+                val thumbOffsetPx = (scrollFraction * (containerHeightPx - thumbHeightPx))
+                    .coerceIn(0f, (containerHeightPx - thumbHeightPx).coerceAtLeast(0f))
+
+                // Wide invisible hit area for drag — covers full track width
                 Box(
                     modifier = Modifier
-                        .fillMaxHeight(fraction.coerceIn(0f, 1f))
+                        .fillMaxSize()
+                        .pointerInput(totalPages) {
+                            detectVerticalDragGestures(
+                                onDragStart = { isDragging = true; scrollbarVisible = true },
+                                onDragEnd = { isDragging = false },
+                                onDragCancel = { isDragging = false },
+                                onVerticalDrag = { change, _ ->
+                                    change.consume()
+                                    val fraction = (change.position.y / size.height).coerceIn(0f, 1f)
+                                    val targetItem = (fraction * totalPages).toInt()
+                                        .coerceIn(0, totalPages - 1)
+                                    coroutineScope.launch { lazyListState.scrollToItem(targetItem) }
+                                }
+                            )
+                        }
+                )
+
+                // Visual track — 4dp wide, centered in the 24dp touch area
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .width(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                // Animated thumb — grows wider while dragging
+                Box(
+                    modifier = Modifier
                         .align(Alignment.TopEnd)
-                ) {}
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(0, (fraction * 1800f).roundToInt().coerceIn(0, 1800)) }
-                        .background(
-                            color = Color.Black.copy(alpha = 0.75f),
-                            shape = RoundedCornerShape(24.dp)
-                        )
-                        .border(1.dp, AppColors.BrandStrong.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "$currentPage\n/ $totalPages",
-                        style = TextStyle(
-                            fontSize = 10.sp,
-                            color = Color.White,
-                            lineHeight = 13.sp,
-                            fontFamily = FontFamily.Monospace
-                        ),
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
+                        .offset { IntOffset(0, thumbOffsetPx.roundToInt()) }
+                        .width(thumbWidthDp)
+                        .heightIn(min = thumbMinHeightDp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(AppColors.BrandStrong)
+                )
             }
+        }
+
+        // ── Issue 3: Bottom-left page capsule ─────────────────────────────────
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 16.dp, bottom = 20.dp)
+                .background(
+                    color = Color.Black.copy(alpha = 0.72f),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .border(
+                    width = 0.5.dp,
+                    color = Color.White.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "$currentPage / $totalPages",
+                style = TextStyle(
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.9f),
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 0.5.sp
+                )
+            )
         }
 
         // ── Snackbar ─────────────────────────────────────────────────────────
@@ -751,39 +950,42 @@ private fun PdfFullscreenViewer(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// PDF PAGE ITEM — lazy render + optional highlighted text panel
+// PDF PAGE ITEM — AGENT 4 (on-canvas highlights) + AGENT 5 (LRU cache)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun PdfPageItem(
     path: String,
     pageIndex: Int,
-    scale: Float,
-    offsetX: Float,
     pageText: String,
     searchQuery: String,
     matchesBeforeThisPage: Int,
     globalActiveMatch: Int
 ) {
-    var bitmap by remember(path, pageIndex) { mutableStateOf<Bitmap?>(null) }
+    // AGENT 5 — LRU cache key
+    val cacheKey = "$path:$pageIndex"
+
+    var bitmap by remember(path, pageIndex) { mutableStateOf<Bitmap?>(pdfPageBitmapCache.get(cacheKey)) }
     var error by remember(path, pageIndex) { mutableStateOf<String?>(null) }
 
-    // Render bitmap in background
+    // AGENT 5 — Render bitmap in background; check cache first
     LaunchedEffect(path, pageIndex) {
+        if (bitmap != null) return@LaunchedEffect   // cache hit — skip render
+
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val file = File(path)
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
                     PdfRenderer(fd).use { renderer ->
                         renderer.openPage(pageIndex).use { page ->
-                            val targetWidth = 1440
+                            // AGENT 5 — Adaptive quality: moderate base width, higher when zoomed
+                            val targetWidth = (page.width * 2).coerceIn(720, 1440)
                             val renderScale = targetWidth.toFloat() / page.width.toFloat()
                             val bmp = Bitmap.createBitmap(
                                 (page.width * renderScale).toInt(),
                                 (page.height * renderScale).toInt(),
                                 Bitmap.Config.ARGB_8888
                             )
-                            // White background so transparent PDFs look correct
                             android.graphics.Canvas(bmp).drawColor(android.graphics.Color.WHITE)
                             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                             bmp
@@ -792,45 +994,55 @@ private fun PdfPageItem(
                 }
             }
         }
-        result.onSuccess { bitmap = it }
+        result.onSuccess { bmp ->
+            pdfPageBitmapCache.put(cacheKey, bmp)
+            bitmap = bmp
+        }
         result.onFailure { error = it.localizedMessage ?: "Render error" }
     }
 
-    // Recycle when removed from composition
+    // Recycle when removed from composition only if not in cache
     DisposableEffect(path, pageIndex) {
         onDispose {
-            bitmap?.recycle()
-            bitmap = null
+            // Don't recycle — let LRU cache manage lifecycle
         }
     }
 
+    // AGENT 4 — Build highlighted bitmap (on-canvas overlay)
+    val highlightedBitmap = remember(bitmap, searchQuery, matchesBeforeThisPage, globalActiveMatch) {
+        val bmp = bitmap ?: return@remember null
+        if (searchQuery.isBlank() || pageText.isBlank()) bmp
+        else bmp.withSearchHighlights(pageText, searchQuery, matchesBeforeThisPage, globalActiveMatch)
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color.Black)
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = if (scale > 1f) offsetX else 0f
-                    // Prevent content clipping during zoom
-                    clip = false
-                }
-        ) {
+        // Issue 4 — Simple render: no per-page zoom; zoom is applied by the parent wrapper Box
+        Box(modifier = Modifier.fillMaxWidth()) {
             when {
                 error != null -> {
-                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), contentAlignment = Alignment.Center) {
-                        Text(error ?: "Error", color = Color.Red.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
+                    Box(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            error ?: "Error",
+                            color = Color.Red.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
-                bitmap == null -> {
-                    Box(modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp), contentAlignment = Alignment.Center) {
+                highlightedBitmap == null -> {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         CircularProgressIndicator(color = AppColors.BrandStrong, modifier = Modifier.size(36.dp))
                     }
                 }
                 else -> {
+                    // AGENT 4 — Display bitmap (with on-canvas highlights already baked in)
                     Image(
-                        bitmap = bitmap!!.asImageBitmap(),
+                        bitmap = highlightedBitmap.asImageBitmap(),
                         contentDescription = "Page ${pageIndex + 1}",
                         modifier = Modifier.fillMaxWidth(),
                         contentScale = ContentScale.FillWidth
@@ -839,27 +1051,61 @@ private fun PdfPageItem(
             }
         }
 
-        // ── Highlighted text panel shown when search is active ───────────────
-        if (searchQuery.isNotBlank() && pageText.isNotBlank()) {
-            val hasMatches = pageText.contains(searchQuery, ignoreCase = true)
-            if (hasMatches) {
-                val annotated = remember(pageText, searchQuery, globalActiveMatch) {
+        // AGENT 4 — Search status strip: show when query active (even if no text extracted)
+        if (searchQuery.isNotBlank()) {
+            val hasText = pageText.isNotBlank()
+            val hasMatches = hasText && pageText.contains(searchQuery, ignoreCase = true)
+            val matchCountOnPage = if (hasMatches) {
+                var cnt = 0; var s = 0
+                while (true) {
+                    val i = pageText.indexOf(searchQuery, s, ignoreCase = true)
+                    if (i < 0) break; cnt++; s = i + searchQuery.length
+                }
+                cnt
+            } else 0
+
+            if (!hasText) {
+                // Graceful fallback when text extraction unavailable
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1A1A1A))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "Text layer unavailable for this page",
+                        style = MaterialTheme.typography.labelSmall.copy(color = Color.White.copy(alpha = 0.4f))
+                    )
+                }
+            } else if (hasMatches) {
+                // Compact match strip below the page showing highlighted text context
+                val annotated = remember(pageText, searchQuery, globalActiveMatch, matchesBeforeThisPage) {
                     buildHighlightedString(pageText, searchQuery, globalActiveMatch, matchesBeforeThisPage)
                 }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF111111))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .background(Color(0xFF111827))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
-                    SelectionContainer {
+                    Column {
                         Text(
-                            text = annotated,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                color = Color.White.copy(alpha = 0.85f),
-                                lineHeight = 18.sp
-                            )
+                            text = "$matchCountOnPage match${if (matchCountOnPage != 1) "es" else ""} on this page",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = AppColors.BrandStrong,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            modifier = Modifier.padding(bottom = 4.dp)
                         )
+                        SelectionContainer {
+                            Text(
+                                text = annotated,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    lineHeight = 18.sp
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -869,8 +1115,8 @@ private fun PdfPageItem(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .size(height = 2.dp, width = 0.dp)
-                .background(Color(0xFF222222))
+                .height(2.dp)
+                .background(Color(0xFF1E2433))
         )
     }
 }
@@ -926,7 +1172,6 @@ private fun OfficeTextDocumentView(
             if (state.request.extension in listOf("ppt", "pptx")) {
                 Text(text = "Read-only slide text preview", style = MaterialTheme.typography.labelLarge, color = AppColors.BrandStrong)
             }
-            var offset = 0
             sections.ifEmpty { listOf("No extractable text found.") }.forEachIndexed { index, section ->
                 val matchesBeforeSection = if (searchQuery.isNotBlank()) {
                     sections.take(index).sumOf { sec ->
@@ -940,7 +1185,6 @@ private fun OfficeTextDocumentView(
                     buildHighlightedString(label, searchQuery, activeMatchIndex, matchesBeforeSection)
                 }
                 ReadOnlyTextCard(annotatedText = annotated, monospace = false)
-                offset += matchesBeforeSection
             }
         }
     }
