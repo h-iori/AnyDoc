@@ -10,6 +10,7 @@ import com.ioristudios.anydoc.model.DocumentKind
 import com.ioristudios.anydoc.model.DocumentViewerState
 import com.ioristudios.anydoc.model.SearchMatch
 import com.ioristudios.anydoc.util.DocumentFileIo
+import com.ioristudios.anydoc.util.PdfTextPositionExtractor
 import com.ioristudios.anydoc.util.DocumentTypeDetector
 import com.ioristudios.anydoc.util.RecentFilesManager
 import java.io.File
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 class DocumentViewerViewModel(application: Application) : AndroidViewModel(application) {
     private val context = application
     private val _uiState = MutableStateFlow<DocumentViewerState>(DocumentViewerState.Loading)
+    private var pdfPageDataList: List<PdfTextPositionExtractor.Companion.PageTextData> = emptyList()
     val uiState: StateFlow<DocumentViewerState> = _uiState.asStateFlow()
 
     init {
@@ -96,7 +98,9 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 val request = DocumentTypeDetector.detect(targetPath, originalUriString)
                 val content = when (request.kind) {
                     DocumentKind.Pdf -> {
-                        val pageTexts = extractPdfPageTexts(targetPath)
+                        val pageData = PdfTextPositionExtractor.extractPageData(targetPath)
+                        pdfPageDataList = pageData
+                        val pageTexts = pageData.map { it.text }
                         DocumentContent.PdfContent(request.path, pageTexts)
                     }
                     DocumentKind.Text -> DocumentContent.TextContent(
@@ -132,38 +136,86 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    /**
-     * Extracts text from each page of the PDF via PDFBox.
-     * Returns an empty list if PDFBox is unavailable or extraction fails.
-     */
-    private fun extractPdfPageTexts(path: String): List<String> {
-        return runCatching {
-            val pdDocumentClass = Class.forName("com.tom_roush.pdfbox.pdmodel.PDDocument")
-            val stripperClass = Class.forName("com.tom_roush.pdfbox.text.PDFTextStripper")
+    private fun findMatchesForPdf(
+        text: String,
+        positions: List<com.tom_roush.pdfbox.text.TextPosition?>,
+        query: String,
+        pageIndex: Int
+    ): List<SearchMatch> {
+        val matches = mutableListOf<SearchMatch>()
+        var start = 0
+        while (true) {
+            val index = text.indexOf(query, startIndex = start, ignoreCase = true)
+            if (index < 0) break
+            val previewStart = (index - 36).coerceAtLeast(0)
+            val previewEnd = (index + query.length + 36).coerceAtMost(text.length)
+            
+            val pdfRects = getRectsForMatch(index, index + query.length, positions)
 
-            val loadMethod = pdDocumentClass.getMethod("load", File::class.java)
-            val document = loadMethod.invoke(null, File(path))
+            matches += SearchMatch(
+                index = index,
+                preview = text.substring(previewStart, previewEnd).replace('\n', ' '),
+                pageIndex = pageIndex,
+                pdfRects = pdfRects
+            )
+            start = index + query.length
+        }
+        return matches
+    }
 
-            val getNumberOfPagesMethod = pdDocumentClass.getMethod("getNumberOfPages")
-            val pageCount = getNumberOfPagesMethod.invoke(document) as Int
+    private fun getRectsForMatch(
+        startIndex: Int,
+        endIndex: Int,
+        positions: List<com.tom_roush.pdfbox.text.TextPosition?>
+    ): List<android.graphics.RectF> {
+        val safeEnd = endIndex.coerceAtMost(positions.size)
+        val safeStart = startIndex.coerceAtMost(safeEnd)
+        if (safeStart >= safeEnd) return emptyList()
 
-            val stripper = stripperClass.getDeclaredConstructor().newInstance()
-            val setStartPageMethod = stripperClass.getMethod("setStartPage", Int::class.java)
-            val setEndPageMethod = stripperClass.getMethod("setEndPage", Int::class.java)
-            val getTextMethod = stripperClass.getMethod("getText", pdDocumentClass)
+        val glyphs = positions.subList(safeStart, safeEnd).filterNotNull()
+        if (glyphs.isEmpty()) return emptyList()
 
-            val closeMethod = pdDocumentClass.getMethod("close")
-
-            val texts = mutableListOf<String>()
-            for (i in 1..pageCount) {
-                setStartPageMethod.invoke(stripper, i)
-                setEndPageMethod.invoke(stripper, i)
-                val text = getTextMethod.invoke(stripper, document) as String
-                texts += text
+        val rects = mutableListOf<android.graphics.RectF>()
+        var currentLineGlyphs = mutableListOf<com.tom_roush.pdfbox.text.TextPosition>()
+        
+        for (glyph in glyphs) {
+            if (currentLineGlyphs.isEmpty()) {
+                currentLineGlyphs.add(glyph)
+            } else {
+                val lastGlyph = currentLineGlyphs.last()
+                if (Math.abs(glyph.yDirAdj - lastGlyph.yDirAdj) < 4f) {
+                    currentLineGlyphs.add(glyph)
+                } else {
+                    rects.add(computeUnionRect(currentLineGlyphs))
+                    currentLineGlyphs = mutableListOf(glyph)
+                }
             }
-            closeMethod.invoke(document)
-            texts
-        }.getOrElse { emptyList() }
+        }
+        if (currentLineGlyphs.isNotEmpty()) {
+            rects.add(computeUnionRect(currentLineGlyphs))
+        }
+        return rects
+    }
+
+    private fun computeUnionRect(glyphs: List<com.tom_roush.pdfbox.text.TextPosition>): android.graphics.RectF {
+        var minX = Float.MAX_VALUE
+        var maxX = Float.MIN_VALUE
+        var minY = Float.MAX_VALUE
+        var maxY = Float.MIN_VALUE
+
+        for (glyph in glyphs) {
+            val left = glyph.xDirAdj
+            val right = glyph.xDirAdj + glyph.widthDirAdj
+            val top = glyph.yDirAdj - glyph.heightDir
+            val bottom = glyph.yDirAdj
+
+            if (left < minX) minX = left
+            if (right > maxX) maxX = right
+            if (top < minY) minY = top
+            if (bottom > maxY) maxY = bottom
+        }
+
+        return android.graphics.RectF(minX, minY, maxX, maxY)
     }
 
     fun enterEditMode() {
@@ -359,12 +411,12 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private fun findMatchesForState(state: DocumentViewerState.Ready, query: String): List<SearchMatch> {
         return when (val content = state.content) {
             is DocumentContent.PdfContent -> {
-                if (content.pageTexts.isEmpty()) {
+                if (pdfPageDataList.isEmpty()) {
                     // No text extracted – fall back to a single match on the name
                     findMatches(state.request.displayName, query, pageIndex = 0)
                 } else {
-                    content.pageTexts.flatMapIndexed { pageIdx, pageText ->
-                        findMatches(pageText, query, pageIndex = pageIdx)
+                    pdfPageDataList.flatMapIndexed { pageIdx, pageData ->
+                        findMatchesForPdf(pageData.text, pageData.positions, query, pageIndex = pageIdx)
                     }
                 }
             }

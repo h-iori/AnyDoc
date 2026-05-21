@@ -140,16 +140,22 @@ import androidx.compose.ui.platform.LocalContext
 private val HighlightNormal = Color(0xFFFFE066)   // yellow
 private val HighlightActive = Color(0xFFFF9800)   // orange
 
+private data class PdfPageFrame(
+    val bitmap: Bitmap,
+    val widthPts: Float,
+    val heightPts: Float
+)
+
 // ─── LRU Bitmap Cache (shared across compositions) ────────────────────────────
 // Capped at 1/8th of available VM heap to avoid OOM
-private val pdfPageBitmapCache: LruCache<String, Bitmap> by lazy {
+private val pdfPageBitmapCache: LruCache<String, PdfPageFrame> by lazy {
     val maxMemKb = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     val cacheSize = maxMemKb / 8
-    object : LruCache<String, Bitmap>(cacheSize) {
-        override fun sizeOf(key: String, value: Bitmap): Int =
-            value.byteCount / 1024
-        override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
-            if (evicted) oldValue.recycle()
+    object : LruCache<String, PdfPageFrame>(cacheSize) {
+        override fun sizeOf(key: String, value: PdfPageFrame): Int =
+            value.bitmap.byteCount / 1024
+        override fun entryRemoved(evicted: Boolean, key: String, oldValue: PdfPageFrame, newValue: PdfPageFrame?) {
+            if (evicted) oldValue.bitmap.recycle()
         }
     }
 }
@@ -183,26 +189,14 @@ private fun buildHighlightedString(
     }
 }
 
-// ─── Helper: draw highlight rects onto a Bitmap ───────────────────────────────
-// Since PdfRenderer produces a bitmap, we overlay highlight boxes by scanning
-// the extracted text for query occurrences and estimating their approximate line
-// positions using line-height heuristics. This gives on-canvas highlights that
-// are visible directly on the page image without a full text-coordinate API.
-private fun Bitmap.withSearchHighlights(
-    pageText: String,
-    query: String,
-    matchesBeforeThisPage: Int,
-    activeGlobalMatch: Int
+// ─── Helper: draw accurate highlight rects onto a Bitmap ──────────────────────
+private fun Bitmap.withAccurateHighlights(
+    matchRects: List<Pair<android.graphics.RectF, Boolean>>,
+    renderScale: Float
 ): Bitmap {
-    if (query.isBlank() || pageText.isBlank()) return this
+    if (matchRects.isEmpty()) return this
     val result = copy(Bitmap.Config.ARGB_8888, true)
     val canvas = Canvas(result)
-
-    val lines = pageText.lines()
-    if (lines.isEmpty()) return result
-
-    val lineHeight = height.toFloat() / lines.size.coerceAtLeast(1)
-    val charWidth = (width.toFloat() / lines.maxOfOrNull { it.length.coerceAtLeast(1) }!!).coerceAtLeast(1f)
 
     val normalPaint = Paint().apply {
         color = HighlightNormal.copy(alpha = 0.45f).toArgb()
@@ -213,21 +207,13 @@ private fun Bitmap.withSearchHighlights(
         style = Paint.Style.FILL
     }
 
-    var globalMatchIdx = matchesBeforeThisPage
-    lines.forEachIndexed { lineIdx, line ->
-        var searchStart = 0
-        while (true) {
-            val found = line.indexOf(query, searchStart, ignoreCase = true)
-            if (found == -1) break
-            val top = lineIdx * lineHeight
-            val bottom = top + lineHeight
-            val left = found * charWidth
-            val right = (found + query.length) * charWidth
-            val paint = if (globalMatchIdx == activeGlobalMatch) activePaint else normalPaint
-            canvas.drawRect(left, top, right.coerceAtMost(width.toFloat()), bottom, paint)
-            globalMatchIdx++
-            searchStart = found + query.length
-        }
+    matchRects.forEach { (rect, isActive) ->
+        val paint = if (isActive) activePaint else normalPaint
+        val left = rect.left * renderScale
+        val top = rect.top * renderScale
+        val right = rect.right * renderScale
+        val bottom = rect.bottom * renderScale
+        canvas.drawRoundRect(android.graphics.RectF(left, top, right, bottom), 4f, 4f, paint)
     }
     return result
 }
@@ -875,17 +861,12 @@ private fun PdfFullscreenViewer(
         ) {
             itemsIndexed(content.pageTexts.indices.toList().ifEmpty { listOf(0) }) { pageIndex, _ ->
                 val pageSearchQuery = if (isSearching) state.searchQuery else ""
-                val matchesBeforeThisPage = if (isSearching) {
-                    state.searchMatches.count { it.pageIndex < pageIndex }
-                } else 0
 
                 PdfPageItem(
                     path = content.path,
                     pageIndex = pageIndex,
-                    pageText = content.pageTexts.getOrElse(pageIndex) { "" },
-                    searchQuery = pageSearchQuery,
-                    matchesBeforeThisPage = matchesBeforeThisPage,
-                    globalActiveMatch = state.activeMatch
+                    state = state,
+                    searchQuery = pageSearchQuery
                 )
             }
             // Bottom padding so last page clears the nav bar
@@ -1055,8 +1036,6 @@ private fun PdfFullscreenViewer(
                                 onVerticalDrag = { change, _ ->
                                     change.consume()
                                     
-                                    val thumbMinHeightDp = 40.dp
-                                    val thumbHeightPx = with(density) { thumbMinHeightDp.toPx() }
                                     val availableHeight = (size.height - thumbHeightPx).coerceAtLeast(1f)
                                     val fraction = ((change.position.y - thumbHeightPx / 2f) / availableHeight).coerceIn(0f, 1f)
                                     
@@ -1164,20 +1143,18 @@ private fun PdfFullscreenViewer(
 private fun PdfPageItem(
     path: String,
     pageIndex: Int,
-    pageText: String,
-    searchQuery: String,
-    matchesBeforeThisPage: Int,
-    globalActiveMatch: Int
+    state: DocumentViewerState.Ready,
+    searchQuery: String
 ) {
     // AGENT 5 — LRU cache key
     val cacheKey = "$path:$pageIndex"
 
-    var bitmap by remember(path, pageIndex) { mutableStateOf<Bitmap?>(pdfPageBitmapCache.get(cacheKey)) }
+    var pageFrame by remember(path, pageIndex) { mutableStateOf<PdfPageFrame?>(pdfPageBitmapCache.get(cacheKey)) }
     var error by remember(path, pageIndex) { mutableStateOf<String?>(null) }
 
     // AGENT 5 — Render bitmap in background; check cache first
     LaunchedEffect(path, pageIndex) {
-        if (bitmap != null) return@LaunchedEffect   // cache hit — skip render
+        if (pageFrame != null) return@LaunchedEffect   // cache hit — skip render
 
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -1195,15 +1172,15 @@ private fun PdfPageItem(
                             )
                             android.graphics.Canvas(bmp).drawColor(android.graphics.Color.WHITE)
                             page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            bmp
+                            PdfPageFrame(bmp, page.width.toFloat(), page.height.toFloat())
                         }
                     }
                 }
             }
         }
-        result.onSuccess { bmp ->
-            pdfPageBitmapCache.put(cacheKey, bmp)
-            bitmap = bmp
+        result.onSuccess { frame ->
+            pdfPageBitmapCache.put(cacheKey, frame)
+            pageFrame = frame
         }
         result.onFailure { error = it.localizedMessage ?: "Render error" }
     }
@@ -1215,11 +1192,22 @@ private fun PdfPageItem(
         }
     }
 
-    // AGENT 4 — Build highlighted bitmap (on-canvas overlay)
-    val highlightedBitmap = remember(bitmap, searchQuery, matchesBeforeThisPage, globalActiveMatch) {
-        val bmp = bitmap ?: return@remember null
-        if (searchQuery.isBlank() || pageText.isBlank()) bmp
-        else bmp.withSearchHighlights(pageText, searchQuery, matchesBeforeThisPage, globalActiveMatch)
+    // AGENT 4 — Build highlighted bitmap (on-canvas overlay using accurate rects)
+    val highlightedBitmap = remember(pageFrame, searchQuery, state.activeMatch) {
+        val frame = pageFrame ?: return@remember null
+        val matches = state.searchMatches.filter { it.pageIndex == pageIndex }
+        
+        if (searchQuery.isBlank() || matches.isEmpty()) {
+            frame.bitmap
+        } else {
+            val activeMatchObj = state.searchMatches.getOrNull(state.activeMatch)
+            val matchRects = matches.flatMap { match ->
+                val isActive = (match === activeMatchObj)
+                match.pdfRects.map { rect -> rect to isActive }
+            }
+            val renderScale = frame.bitmap.width.toFloat() / frame.widthPts
+            frame.bitmap.withAccurateHighlights(matchRects, renderScale)
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1254,66 +1242,6 @@ private fun PdfPageItem(
                         modifier = Modifier.fillMaxWidth(),
                         contentScale = ContentScale.FillWidth
                     )
-                }
-            }
-        }
-
-        // AGENT 4 — Search status strip: show when query active (even if no text extracted)
-        if (searchQuery.isNotBlank()) {
-            val hasText = pageText.isNotBlank()
-            val hasMatches = hasText && pageText.contains(searchQuery, ignoreCase = true)
-            val matchCountOnPage = if (hasMatches) {
-                var cnt = 0; var s = 0
-                while (true) {
-                    val i = pageText.indexOf(searchQuery, s, ignoreCase = true)
-                    if (i < 0) break; cnt++; s = i + searchQuery.length
-                }
-                cnt
-            } else 0
-
-            if (!hasText) {
-                // Graceful fallback when text extraction unavailable
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF1A1A1A))
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = "Text layer unavailable for this page",
-                        style = MaterialTheme.typography.labelSmall.copy(color = Color.White.copy(alpha = 0.4f))
-                    )
-                }
-            } else if (hasMatches) {
-                // Compact match strip below the page showing highlighted text context
-                val annotated = remember(pageText, searchQuery, globalActiveMatch, matchesBeforeThisPage) {
-                    buildHighlightedString(pageText, searchQuery, globalActiveMatch, matchesBeforeThisPage)
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF111827))
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Column {
-                        Text(
-                            text = "$matchCountOnPage match${if (matchCountOnPage != 1) "es" else ""} on this page",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                color = AppColors.BrandStrong,
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        SelectionContainer {
-                            Text(
-                                text = annotated,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    lineHeight = 18.sp
-                                )
-                            )
-                        }
-                    }
                 }
             }
         }

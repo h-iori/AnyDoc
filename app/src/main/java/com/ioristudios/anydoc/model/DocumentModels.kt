@@ -1,5 +1,7 @@
 package com.ioristudios.anydoc.model
 
+import android.graphics.RectF
+
 enum class DocumentKind {
     Pdf,
     Presentation,
@@ -25,8 +27,10 @@ data class DocumentOpenRequest(
 data class SearchMatch(
     val index: Int,
     val preview: String,
-    val pageIndex: Int = 0    // For PDFs: which page (0-based) this match lives on
+    val pageIndex: Int = 0,    // For PDFs: which page (0-based) this match lives on
+    val pdfRects: List<RectF> = emptyList()
 )
+
 
 sealed class DocumentContent {
     data class TextContent(val text: String, val isCodeLike: Boolean) : DocumentContent()
