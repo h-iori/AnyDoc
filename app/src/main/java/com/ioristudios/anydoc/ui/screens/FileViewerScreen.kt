@@ -78,6 +78,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.exponentialDecay
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,8 +92,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import kotlinx.coroutines.Job
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -578,6 +588,9 @@ private fun PdfFullscreenViewer(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    var isMultiTouch by remember { mutableStateOf(false) }
+    var flingJobX by remember { mutableStateOf<Job?>(null) }
+    var flingJobY by remember { mutableStateOf<Job?>(null) }
 
     // ── AGENT 1: Scroll / visibility state ───────────────────────────────────
     val lazyListState = rememberLazyListState()
@@ -634,24 +647,76 @@ private fun PdfFullscreenViewer(
         }
     }
 
-    // FIX #7 — Smooth scroll fraction using both index + pixel offset
+    val totalPages = content.pageTexts.size.coerceAtLeast(1)
+
+    // FIX #7 — Smooth scroll fraction using both index + pixel offset, mapping exactly 0f to 1f
     val scrollFraction by remember {
         derivedStateOf {
             val layoutInfo = lazyListState.layoutInfo
-            val totalItems = layoutInfo.totalItemsCount.coerceAtLeast(1)
             val visibleItems = layoutInfo.visibleItemsInfo
             if (visibleItems.isEmpty()) return@derivedStateOf 0f
-            val avgItemHeight = visibleItems.map { it.size }.average().toFloat().coerceAtLeast(1f)
-            val firstVisible = lazyListState.firstVisibleItemIndex
-            val firstOffset = lazyListState.firstVisibleItemScrollOffset
-            ((firstVisible * avgItemHeight + firstOffset) / (totalItems * avgItemHeight)).coerceIn(0f, 1f)
+
+            val firstVisibleItem = visibleItems.first()
+            val lastVisibleItem = visibleItems.last()
+            val totalItems = layoutInfo.totalItemsCount
+
+            // 1. Check if we are at the very start
+            if (firstVisibleItem.index == 0 && firstVisibleItem.offset == 0) {
+                return@derivedStateOf 0f
+            }
+
+            // 2. Check if we are at the very end
+            if (lastVisibleItem.index == totalItems - 1) {
+                val lastItemBottom = lastVisibleItem.offset + lastVisibleItem.size
+                val viewportBottom = layoutInfo.viewportEndOffset
+                if (lastItemBottom <= viewportBottom) {
+                    return@derivedStateOf 1f
+                }
+            }
+
+            // 3. Otherwise, interpolate using exact page height calculation
+            val pageHeightPx = visibleItems.firstOrNull { it.index < totalPages }?.size ?: 1
+            val bottomSpacerPx = with(density) { 80.dp.toPx() }
+            val totalHeight = totalPages * pageHeightPx + bottomSpacerPx
+            val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+            val maxScroll = (totalHeight - viewportHeight).coerceAtLeast(1f)
+
+            val currentScroll = lazyListState.firstVisibleItemIndex * pageHeightPx + lazyListState.firstVisibleItemScrollOffset
+            (currentScroll.toFloat() / maxScroll).coerceIn(0f, 1f)
         }
     }
 
+    // Precise page calculation: find the page item covering the center of the viewport
     val currentPage by remember {
-        derivedStateOf { lazyListState.firstVisibleItemIndex + 1 }
+        derivedStateOf {
+            val layoutInfo = lazyListState.layoutInfo
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.isEmpty()) return@derivedStateOf 1
+
+            val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2
+
+            // Find the item that contains the viewport center
+            val centerItem = visibleItems.firstOrNull { item ->
+                val itemStart = item.offset
+                val itemEnd = item.offset + item.size
+                viewportCenter in itemStart..itemEnd
+            } ?: visibleItems.firstOrNull() // fallback to first visible item
+
+            val index = centerItem?.index ?: 0
+            val pageIdx = index.coerceIn(0, totalPages - 1)
+            pageIdx + 1
+        }
     }
-    val totalPages = content.pageTexts.size.coerceAtLeast(1)
+
+    // Trigger haptic feedback when the page changes (crossing boundaries)
+    var isFirstPageLoad by remember { mutableStateOf(true) }
+    LaunchedEffect(currentPage) {
+        if (isFirstPageLoad) {
+            isFirstPageLoad = false
+        } else {
+            haptics.performHapticFeedback()
+        }
+    }
 
     // Issue 1 Fix — Animated top padding: shrinks to status-bar-only when bars are hidden
     val animatedTopPadding by animateDpAsState(
@@ -668,30 +733,126 @@ private fun PdfFullscreenViewer(
                 .fillMaxSize()
                 .padding(top = animatedTopPadding)
                 .pointerInput(totalPages) {
-                    // Draggable scrollbar drag gesture is handled separately on the track.
-                    // This block handles pinch-zoom + pan for the whole document.
-                    detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                        scale = newScale
-                        if (newScale > 1f) {
-                            val maxPanX = (size.width * (newScale - 1f)) / 2f
-                            val maxPanY = (size.height * (newScale - 1f)) / 2f
-                            offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
-                            offsetY = (offsetY + pan.y).coerceIn(-maxPanY, maxPanY)
-                        } else {
-                            offsetX = 0f
-                            offsetY = 0f
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        flingJobX?.cancel()
+                        flingJobY?.cancel()
+                        val velocityTracker = VelocityTracker()
+                        velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val changes = event.changes
+                            val activeChanges = changes.filter { it.pressed }
+
+                            if (activeChanges.isEmpty()) {
+                                // Gesture ended — fling if zoomed in
+                                if (scale > 1.1f) {
+                                    val velocity = velocityTracker.calculateVelocity()
+                                    val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
+
+                                    flingJobX = coroutineScope.launch {
+                                        Animatable(offsetX).animateDecay(
+                                            initialVelocity = velocity.x,
+                                            animationSpec = exponentialDecay()
+                                        ) {
+                                            offsetX = this.value.coerceIn(-maxPanX, maxPanX)
+                                        }
+                                    }
+                                    flingJobY = coroutineScope.launch {
+                                        var lastValue = offsetY
+                                        Animatable(offsetY).animateDecay(
+                                            initialVelocity = velocity.y,
+                                            animationSpec = exponentialDecay()
+                                        ) {
+                                            val delta = this.value - lastValue
+                                            lastValue = this.value
+                                            
+                                            val newOffsetY = offsetY + delta
+                                            if (newOffsetY > maxPanY) {
+                                                offsetY = maxPanY
+                                                val overscroll = newOffsetY - maxPanY
+                                                lazyListState.dispatchRawDelta(-overscroll)
+                                            } else if (newOffsetY < -maxPanY) {
+                                                offsetY = -maxPanY
+                                                val overscroll = newOffsetY - (-maxPanY)
+                                                lazyListState.dispatchRawDelta(-overscroll)
+                                            } else {
+                                                offsetY = newOffsetY
+                                            }
+                                        }
+                                    }
+                                }
+                                isMultiTouch = false
+                                break
+                            }
+
+                            val isMulti = activeChanges.size >= 2
+                            isMultiTouch = isMulti
+
+                            if (isMulti) {
+                                val centroid = event.calculateCentroid(useCurrent = false)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                val scaleChange = newScale / scale
+
+                                if (newScale > 1f) {
+                                    val maxPanX = ((size.width * newScale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * newScale) - size.height).coerceAtLeast(0f) / 2f
+                                    offsetX = (offsetX * scaleChange - (centroid.x - center.x) * (scaleChange - 1) + pan.x).coerceIn(-maxPanX, maxPanX)
+                                    offsetY = (offsetY * scaleChange - (centroid.y - center.y) * (scaleChange - 1) + pan.y).coerceIn(-maxPanY, maxPanY)
+                                    scale = newScale
+                                } else {
+                                    scale = 1f; offsetX = 0f; offsetY = 0f
+                                }
+                                changes.forEach { it.consume() }
+                            } else {
+                                if (scale > 1f) {
+                                    val pointer = activeChanges.first()
+                                    velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
+
+                                    val pan = event.calculatePan()
+                                    val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
+                                    offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
+                                    
+                                    val newOffsetY = offsetY + pan.y
+                                    if (newOffsetY > maxPanY) {
+                                        offsetY = maxPanY
+                                        val overscroll = newOffsetY - maxPanY
+                                        lazyListState.dispatchRawDelta(-overscroll)
+                                    } else if (newOffsetY < -maxPanY) {
+                                        offsetY = -maxPanY
+                                        val overscroll = newOffsetY - (-maxPanY)
+                                        lazyListState.dispatchRawDelta(-overscroll)
+                                    } else {
+                                        offsetY = newOffsetY
+                                    }
+                                    changes.forEach { it.consume() }
+                                }
+                            }
                         }
                     }
                 }
                 .pointerInput(isSearching) {
                     detectTapGestures(
                         onTap = { if (!isSearching) barsVisible = !barsVisible },
-                        onDoubleTap = {
+                        onDoubleTap = { tapOffset ->
+                            flingJobX?.cancel()
+                            flingJobY?.cancel()
                             if (scale > 1.1f) {
                                 scale = 1f; offsetX = 0f; offsetY = 0f
                             } else {
-                                scale = 2.5f
+                                val targetScale = 2.5f
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val maxPanX = ((size.width * targetScale) - size.width).coerceAtLeast(0f) / 2f
+                                val maxPanY = ((size.height * targetScale) - size.height).coerceAtLeast(0f) / 2f
+                                offsetX = (-(tapOffset.x - center.x) * targetScale).coerceIn(-maxPanX, maxPanX)
+                                offsetY = (-(tapOffset.y - center.y) * targetScale).coerceIn(-maxPanY, maxPanY)
+                                scale = targetScale
                             }
                         }
                     )
@@ -707,6 +868,7 @@ private fun PdfFullscreenViewer(
         // ── PDF pages list ─────────────────────────────────────────────────────
         LazyColumn(
             state = lazyListState,
+            userScrollEnabled = scale <= 1f && !isMultiTouch,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
@@ -845,10 +1007,11 @@ private fun PdfFullscreenViewer(
             }
         }
 
-        // ── Issue 2: Draggable scrollbar — 24dp touch target, 4dp visual track ──
+        // ── Issue 2: Draggable scrollbar — 36dp touch target, sleek glassmorphic UI ──
         var isDragging by remember { mutableStateOf(false) }
+        var dragScrollJob by remember { mutableStateOf<Job?>(null) }
         val thumbWidthDp by animateDpAsState(
-            targetValue = if (isDragging) 6.dp else 4.dp,
+            targetValue = if (isDragging) 12.dp else 8.dp,
             animationSpec = tween(150),
             label = "thumbWidth"
         )
@@ -860,7 +1023,7 @@ private fun PdfFullscreenViewer(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .width(24.dp)  // wide touch target
+                .width(36.dp)  // wide touch target
                 .padding(top = animatedTopPadding, bottom = 8.dp)
         ) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -876,39 +1039,83 @@ private fun PdfFullscreenViewer(
                         .fillMaxSize()
                         .pointerInput(totalPages) {
                             detectVerticalDragGestures(
-                                onDragStart = { isDragging = true; scrollbarVisible = true },
-                                onDragEnd = { isDragging = false },
-                                onDragCancel = { isDragging = false },
+                                onDragStart = { 
+                                    isDragging = true
+                                    scrollbarVisible = true
+                                    dragScrollJob?.cancel()
+                                },
+                                onDragEnd = { 
+                                    isDragging = false
+                                    dragScrollJob?.cancel()
+                                },
+                                onDragCancel = { 
+                                    isDragging = false
+                                    dragScrollJob?.cancel()
+                                },
                                 onVerticalDrag = { change, _ ->
                                     change.consume()
-                                    val fraction = (change.position.y / size.height).coerceIn(0f, 1f)
-                                    val targetItem = (fraction * totalPages).toInt()
-                                        .coerceIn(0, totalPages - 1)
-                                    coroutineScope.launch { lazyListState.scrollToItem(targetItem) }
+                                    
+                                    val thumbMinHeightDp = 40.dp
+                                    val thumbHeightPx = with(density) { thumbMinHeightDp.toPx() }
+                                    val availableHeight = (size.height - thumbHeightPx).coerceAtLeast(1f)
+                                    val fraction = ((change.position.y - thumbHeightPx / 2f) / availableHeight).coerceIn(0f, 1f)
+                                    
+                                    val layoutInfo = lazyListState.layoutInfo
+                                    val visibleItems = layoutInfo.visibleItemsInfo
+                                    if (visibleItems.isNotEmpty()) {
+                                        val totalItems = layoutInfo.totalItemsCount
+                                        val pageHeightPx = visibleItems.firstOrNull { it.index < totalPages }?.size ?: visibleItems.first().size
+                                        val viewportHeight = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+                                        
+                                        val bottomSpacerPx = with(density) { 80.dp.toPx() }
+                                        val totalHeight = totalPages * pageHeightPx + bottomSpacerPx
+                                        val maxScroll = (totalHeight - viewportHeight).coerceAtLeast(0f)
+                                        
+                                        val targetScrollPx = fraction * maxScroll
+                                        val targetItem = (targetScrollPx / pageHeightPx).toInt().coerceIn(0, totalItems - 1)
+                                        val targetOffset = (targetScrollPx % pageHeightPx).toInt()
+                                        
+                                        dragScrollJob?.cancel()
+                                        dragScrollJob = coroutineScope.launch(Dispatchers.Main.immediate) {
+                                            lazyListState.scrollToItem(targetItem, targetOffset)
+                                        }
+                                    }
                                 }
                             )
                         }
                 )
 
-                // Visual track — 4dp wide, centered in the 24dp touch area
+                // Visual track — sleek translucent border & fill
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
+                        .padding(end = 8.dp)
                         .fillMaxHeight()
-                        .width(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
+                        .width(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(
+                            width = 0.5.dp,
+                            color = Color.White.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(4.dp)
+                        )
                 )
 
-                // Animated thumb — grows wider while dragging
+                // Animated thumb — premium rounded pill with high-contrast accent border
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
+                        .padding(end = 8.dp)
                         .offset { IntOffset(0, thumbOffsetPx.roundToInt()) }
                         .width(thumbWidthDp)
                         .heightIn(min = thumbMinHeightDp)
-                        .clip(RoundedCornerShape(3.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(AppColors.BrandStrong)
+                        .border(
+                            width = 0.5.dp,
+                            color = Color.White.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
                 )
             }
         }
