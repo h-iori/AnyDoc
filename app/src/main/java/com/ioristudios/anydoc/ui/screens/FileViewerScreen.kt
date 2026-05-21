@@ -587,7 +587,6 @@ private fun PdfFullscreenViewer(
     // Status bar height so first page clears status bar in addition to top bar
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val topContentOffset = TOP_BAR_HEIGHT + statusBarPadding
-    val topBarHeightPx = with(density) { TOP_BAR_HEIGHT.toPx().toInt() }
 
     // FIX #12 — Keep bars visible while search is active
     LaunchedEffect(lazyListState, isSearching) {
@@ -621,14 +620,17 @@ private fun PdfFullscreenViewer(
     }
 
     // FIX #10 — Auto-scroll to the page containing the active match,
-    //           accounting for top bar height so match isn't hidden behind bar
+    //           resetting zoom/pan and aligning exactly with the top bar
     LaunchedEffect(state.activeMatch) {
         val matchList = state.searchMatches
         if (matchList.isNotEmpty() && state.activeMatch >= 0) {
             val pageIdx = matchList[state.activeMatch].pageIndex
+            scale = 1f
+            offsetX = 0f
+            offsetY = 0f
             lazyListState.animateScrollToItem(
                 index = pageIdx,
-                scrollOffset = -topBarHeightPx
+                scrollOffset = 0
             )
         }
     }
