@@ -124,6 +124,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ioristudios.anydoc.model.*
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.NeonPurpleSubtle
 import com.ioristudios.anydoc.ui.theme.neonGlow
 import com.ioristudios.anydoc.ui.theme.rememberAppSpacing
 import com.ioristudios.anydoc.viewmodel.DocumentViewerViewModel
@@ -600,10 +601,16 @@ fun FileViewerScreen(
                 if (ready != null && !ready.isEditing) {
                     FloatingActionButton(
                         onClick = { haptics.performHapticFeedback(); viewModel.enterEditMode() },
-                        containerColor = if (ready.request.canEdit) AppColors.BrandStrong else AppColors.SurfaceHighest,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        containerColor = if (ready.request.canEdit) NeonPurpleSubtle else AppColors.SurfaceHighest,
+                        contentColor = if (ready.request.canEdit) AppColors.BrandStrong else MaterialTheme.colorScheme.onSurfaceVariant,
                         shape = CircleShape,
-                        modifier = Modifier.neonGlow(color = AppColors.Brand.copy(alpha = 0.4f), radius = spacing.itemGap)
+                        modifier = if (ready.request.canEdit) {
+                            Modifier
+                                .neonGlow(color = AppColors.BrandStrong, radius = 12.dp, shape = CircleShape)
+                                .border(1.5.dp, AppColors.BrandStrong, CircleShape)
+                        } else {
+                            Modifier.neonGlow(color = AppColors.Brand.copy(alpha = 0.4f), radius = spacing.itemGap)
+                        }
                     ) {
                         Icon(Icons.Default.Edit, contentDescription = if (ready.request.canEdit) "Edit" else "Read only")
                     }
@@ -2227,11 +2234,12 @@ private fun WordFloatingEditButton(
         FloatingActionButton(
             onClick = onClick,
             shape = CircleShape,
-            containerColor = AppColors.BrandStrong,
-            contentColor = Color.White,
+            containerColor = NeonPurpleSubtle,
+            contentColor = AppColors.BrandStrong,
             modifier = Modifier
                 .size(58.dp)
-                .shadow(10.dp, CircleShape, ambientColor = WordUi.WordShadow, spotColor = WordUi.WordShadow)
+                .neonGlow(color = AppColors.BrandStrong, radius = 12.dp, shape = CircleShape)
+                .border(1.5.dp, AppColors.BrandStrong, CircleShape)
         ) {
             Icon(Icons.Default.Edit, contentDescription = "Edit Word document")
         }

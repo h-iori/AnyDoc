@@ -57,8 +57,26 @@ object DocumentFileIo {
             val pNode = pNodes[index]
             val newText = editedParagraphs[index] ?: continue
 
-            val toRemove = mutableListOf<Node>()
+            var originalRPr: Node? = null
             val pChildren = pNode.childNodes
+            for (i in 0 until pChildren.length) {
+                val child = pChildren.item(i)
+                val childName = child.localName ?: child.nodeName.substringAfter(':')
+                if (childName == "r") {
+                    val runChildren = child.childNodes
+                    for (j in 0 until runChildren.length) {
+                        val rChild = runChildren.item(j)
+                        val rChildName = rChild.localName ?: rChild.nodeName.substringAfter(':')
+                        if (rChildName == "rPr") {
+                            originalRPr = rChild
+                            break
+                        }
+                    }
+                    if (originalRPr != null) break
+                }
+            }
+
+            val toRemove = mutableListOf<Node>()
             for (i in 0 until pChildren.length) {
                 val child = pChildren.item(i)
                 val childName = child.localName ?: child.nodeName.substringAfter(':')
@@ -83,6 +101,9 @@ object DocumentFileIo {
             val tTag = if (prefix.isNotEmpty()) "$prefix:t" else "t"
 
             val rNode = doc.createElementNS(nsUri, rTag)
+            if (originalRPr != null) {
+                rNode.appendChild(doc.importNode(originalRPr, true))
+            }
             val tNode = doc.createElementNS(nsUri, tTag)
             tNode.setAttribute("xml:space", "preserve")
             tNode.textContent = newText
