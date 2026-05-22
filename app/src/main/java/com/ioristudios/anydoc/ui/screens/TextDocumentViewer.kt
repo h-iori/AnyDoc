@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -422,6 +423,7 @@ fun TextDocumentFullscreenViewer(
     state: DocumentViewerState.Ready,
     isSearching: Boolean,
     onBack: () -> Unit,
+    onTitleDoubleTap: () -> Unit,
     onSearchOpen: () -> Unit,
     onSearchClose: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -686,7 +688,11 @@ fun TextDocumentFullscreenViewer(
                 // ─── Main TopBar ─────────────────────────────────────────
                 TopAppBar(
                     title = {
-                        Column {
+                        Column(
+                            modifier = Modifier.pointerInput(Unit) {
+                                detectTapGestures(onDoubleTap = { onTitleDoubleTap() })
+                            }
+                        ) {
                             Text(
                                 text = state.request.displayName,
                                 maxLines = 1,

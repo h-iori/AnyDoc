@@ -306,7 +306,11 @@ fun PresentationFullscreenViewer(
             } else {
                 TopAppBar(
                     title = {
-                        Column {
+                        Column(
+                            modifier = Modifier.pointerInput(Unit) {
+                                detectTapGestures(onDoubleTap = { onTitleDoubleTap() })
+                            }
+                        ) {
                             Text(
                                 text = state.request.displayName,
                                 maxLines = 1,

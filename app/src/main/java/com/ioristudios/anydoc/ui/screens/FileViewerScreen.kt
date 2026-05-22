@@ -535,6 +535,10 @@ fun FileViewerScreen(
                     onBack()
                 }
             },
+            onTitleDoubleTap = {
+                renameInput = ready.request.displayName.substringBeforeLast(".")
+                showRenameDialog = true
+            },
             onSearchOpen = { isSearching = true },
             onSearchClose = {
                 viewModel.updateSearch("")
@@ -575,6 +579,10 @@ fun FileViewerScreen(
                 } else {
                     onBack()
                 }
+            },
+            onTitleDoubleTap = {
+                renameInput = ready.request.displayName.substringBeforeLast(".")
+                showRenameDialog = true
             },
             onSearchOpen = { isSearching = true },
             onSearchClose = {

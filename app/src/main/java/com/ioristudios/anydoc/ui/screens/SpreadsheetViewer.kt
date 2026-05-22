@@ -161,6 +161,7 @@ fun SpreadsheetFullscreenViewer(
     state: DocumentViewerState.Ready,
     isSearching: Boolean,
     onBack: () -> Unit,
+    onTitleDoubleTap: () -> Unit,
     onSearchOpen: () -> Unit,
     onSearchClose: () -> Unit,
     onSearchQueryChange: (String) -> Unit,
@@ -1039,7 +1040,11 @@ fun SpreadsheetFullscreenViewer(
                 // Default toolbar
                 TopAppBar(
                     title = {
-                        Column {
+                        Column(
+                            modifier = Modifier.pointerInput(Unit) {
+                                detectTapGestures(onDoubleTap = { onTitleDoubleTap() })
+                            }
+                        ) {
                             Text(
                                 text = state.request.displayName,
                                 maxLines = 1,

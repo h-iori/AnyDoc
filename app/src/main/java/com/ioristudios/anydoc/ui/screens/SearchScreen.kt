@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,13 +63,18 @@ fun SearchScreen(
     onOpenFile: (String) -> Unit,
     viewModel: FilesViewModel = viewModel()
 ) {
-    var query by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf(initialFilter) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var lastInitialFilter by rememberSaveable { mutableStateOf(initialFilter) }
+    var selectedFilter by rememberSaveable { mutableStateOf(initialFilter) }
     var totalDragX by remember { mutableStateOf(0f) }
     val chipListState = rememberLazyListState()
+    val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
     
     LaunchedEffect(initialFilter) {
-        selectedFilter = initialFilter
+        if (initialFilter != lastInitialFilter) {
+            selectedFilter = initialFilter
+            lastInitialFilter = initialFilter
+        }
     }
     val filters = listOf("All", "PDF", "Word", "Excel", "PPT", "TXT", "Code")
     
@@ -158,11 +164,13 @@ fun SearchScreen(
                                 // Swipe right (finger moves left-to-right) -> previous filter
                                 if (currentIndex > 0) {
                                     selectedFilter = filters[currentIndex - 1]
+                                    haptics.performHapticFeedback()
                                 }
                             } else if (totalDragX < -swipeThreshold) {
                                 // Swipe left (finger moves right-to-left) -> next filter
                                 if (currentIndex < filters.lastIndex) {
                                     selectedFilter = filters[currentIndex + 1]
+                                    haptics.performHapticFeedback()
                                 }
                             }
                         },
