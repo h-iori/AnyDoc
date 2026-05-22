@@ -28,8 +28,8 @@ object DocumentTypeDetector {
             else -> DocumentKind.Unsupported
         }
         val canEdit = when (extension) {
-            "pdf", "ppt", "pptx", "doc", "xls", "rtf" -> false
-            "docx", "xlsx", "csv" -> true
+            "pdf", "ppt", "pptx", "doc", "rtf" -> false
+            "docx", "xlsx", "xls", "csv" -> true
             in editableTextExtensions -> true
             else -> false
         }

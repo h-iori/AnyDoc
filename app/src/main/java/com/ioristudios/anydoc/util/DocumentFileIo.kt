@@ -3,11 +3,14 @@ package com.ioristudios.anydoc.util
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.charset.Charset
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import javax.xml.parsers.DocumentBuilderFactory
+import org.apache.poi.hssf.usermodel.HSSFWorkbook
 
 object DocumentFileIo {
     private val utf8: Charset = Charsets.UTF_8
@@ -304,6 +307,58 @@ object DocumentFileIo {
         }
 
         replaceZipEntry(path, sheetPath, xml.toByteArray(utf8))
+    }
+
+    fun writeXlsSheet(
+        path: String,
+        sheetIndex: Int,
+        editedCells: Map<String, String>
+    ) {
+        val file = File(path)
+        val workbook = if (file.exists() && file.length() > 0) {
+            FileInputStream(file).use { fis ->
+                HSSFWorkbook(fis)
+            }
+        } else {
+            HSSFWorkbook()
+        }
+
+        val sheet = if (sheetIndex < workbook.numberOfSheets) {
+            workbook.getSheetAt(sheetIndex)
+        } else {
+            while (workbook.numberOfSheets <= sheetIndex) {
+                workbook.createSheet("Sheet${workbook.numberOfSheets + 1}")
+            }
+            workbook.getSheetAt(sheetIndex)
+        }
+
+        for ((cellKey, value) in editedCells) {
+            val parts = cellKey.split(":")
+            if (parts.size == 2) {
+                val rowIdx = parts[0].toIntOrNull() ?: continue
+                val colIdx = parts[1].toIntOrNull() ?: continue
+
+                val row = sheet.getRow(rowIdx) ?: sheet.createRow(rowIdx)
+                val cell = row.getCell(colIdx) ?: row.createCell(colIdx)
+
+                val doubleVal = value.toDoubleOrNull()
+                if (doubleVal != null) {
+                    cell.setCellValue(doubleVal)
+                } else if (value.startsWith("=")) {
+                    runCatching {
+                        cell.cellFormula = value.substring(1)
+                    }.onFailure {
+                        cell.setCellValue(value)
+                    }
+                } else {
+                    cell.setCellValue(value)
+                }
+            }
+        }
+
+        FileOutputStream(file).use { fos ->
+            workbook.write(fos)
+        }
     }
 
     private fun discoverSheetPath(path: String, sheetIndex: Int): String {

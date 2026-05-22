@@ -28,7 +28,10 @@ data class SearchMatch(
     val index: Int,
     val preview: String,
     val pageIndex: Int = 0,    // For PDFs: which page (0-based) this match lives on
-    val pdfRects: List<RectF> = emptyList()
+    val pdfRects: List<RectF> = emptyList(),
+    val sheetIndex: Int = -1,  // For spreadsheets: sheet index (0-based)
+    val rowIndex: Int = -1,    // For spreadsheets: row index (0-based)
+    val colIndex: Int = -1     // For spreadsheets: col index (0-based)
 )
 
 

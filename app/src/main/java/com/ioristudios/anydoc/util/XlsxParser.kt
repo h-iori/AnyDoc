@@ -4,8 +4,16 @@ import com.ioristudios.anydoc.model.*
 import org.w3c.dom.Document
 import org.w3c.dom.Node
 import java.io.ByteArrayInputStream
+import java.io.FileInputStream
 import java.util.zip.ZipFile
 import javax.xml.parsers.DocumentBuilderFactory
+import org.apache.poi.hssf.usermodel.HSSFWorkbook
+import org.apache.poi.hssf.usermodel.HSSFFont
+import org.apache.poi.hssf.usermodel.HSSFPalette
+import org.apache.poi.ss.usermodel.DateUtil
+import org.apache.poi.ss.usermodel.FillPatternType
+import org.apache.poi.ss.usermodel.HorizontalAlignment
+import org.apache.poi.ss.usermodel.BorderStyle
 
 /**
  * Offline OOXML XLSX parser.
@@ -16,6 +24,18 @@ import javax.xml.parsers.DocumentBuilderFactory
 object XlsxParser {
 
     fun parse(path: String): DocumentContent.SpreadsheetContent {
+        return try {
+            parseXlsxInternal(path)
+        } catch (e: Exception) {
+            try {
+                parseXlsInternal(path)
+            } catch (fallbackEx: Exception) {
+                throw e
+            }
+        }
+    }
+
+    private fun parseXlsxInternal(path: String): DocumentContent.SpreadsheetContent {
         ZipFile(path).use { zip ->
             // 1. Parse shared strings
             val sharedStrings = parseSharedStrings(zip)
@@ -50,6 +70,219 @@ object XlsxParser {
                 styles = styles
             )
         }
+    }
+
+    fun parseXls(path: String): DocumentContent.SpreadsheetContent {
+        return try {
+            parseXlsInternal(path)
+        } catch (e: Exception) {
+            try {
+                parseXlsxInternal(path)
+            } catch (fallbackEx: Exception) {
+                throw e
+            }
+        }
+    }
+
+    private fun parseXlsInternal(path: String): DocumentContent.SpreadsheetContent {
+        FileInputStream(path).use { fis ->
+            val workbook = HSSFWorkbook(fis)
+            val sheets = mutableListOf<SpreadsheetSheet>()
+
+            val numStyles = workbook.numCellStyles
+            val styles = (0 until numStyles).map { idx ->
+                val poiStyle = workbook.getCellStyleAt(idx)
+                val fontIndex = poiStyle.fontIndexAsInt
+                val poiFont = workbook.getFontAt(fontIndex)
+
+                val bold = poiFont.bold
+                val italic = poiFont.italic
+                val fontSize = poiFont.fontHeightInPoints.toFloat()
+
+                val palette = workbook.customPalette
+                val fontColorHex = fontColorToHex(poiFont, palette)
+                val bgColorHex = fillPatternToHex(poiStyle, palette)
+
+                val alignment = when (poiStyle.alignment) {
+                    HorizontalAlignment.CENTER -> SpreadsheetAlignment.CENTER
+                    HorizontalAlignment.RIGHT -> SpreadsheetAlignment.RIGHT
+                    HorizontalAlignment.LEFT -> SpreadsheetAlignment.LEFT
+                    else -> SpreadsheetAlignment.GENERAL
+                }
+
+                val borders = CellBorders(
+                    top = poiStyle.borderTop != BorderStyle.NONE,
+                    bottom = poiStyle.borderBottom != BorderStyle.NONE,
+                    left = poiStyle.borderLeft != BorderStyle.NONE,
+                    right = poiStyle.borderRight != BorderStyle.NONE
+                )
+
+                SpreadsheetStyle(
+                    fontBold = bold,
+                    fontItalic = italic,
+                    fontSize = fontSize,
+                    fontColor = fontColorHex,
+                    backgroundColor = bgColorHex,
+                    numberFormat = poiStyle.dataFormatString,
+                    horizontalAlignment = alignment,
+                    borders = borders,
+                    fontFamily = poiFont.fontName
+                )
+            }
+
+            for (sheetIdx in 0 until workbook.numberOfSheets) {
+                val poiSheet = workbook.getSheetAt(sheetIdx)
+                val sheetName = workbook.getSheetName(sheetIdx)
+
+                val columnWidths = mutableMapOf<Int, Float>()
+                var maxCol = 0
+                val rowCount = poiSheet.lastRowNum + 1
+
+                val rows = mutableListOf<SpreadsheetRow>()
+                for (rowIdx in 0..poiSheet.lastRowNum) {
+                    val poiRow = poiSheet.getRow(rowIdx) ?: continue
+                    val cells = mutableMapOf<Int, SpreadsheetCell>()
+                    for (colIdx in 0 until poiRow.lastCellNum) {
+                        val poiCell = poiRow.getCell(colIdx) ?: continue
+                        if (colIdx + 1 > maxCol) {
+                            maxCol = colIdx + 1
+                        }
+
+                        val widthInChars = poiSheet.getColumnWidth(colIdx) / 256f
+                        val widthDp = widthInChars * 8f + 18f
+                        columnWidths[colIdx] = widthDp
+
+                        val styleIndex = poiCell.cellStyle.index.toInt()
+
+                        var displayValue = ""
+                        var rawValue = ""
+                        var cellType = CellType.BLANK
+
+                        when (poiCell.cellType) {
+                            org.apache.poi.ss.usermodel.CellType.STRING -> {
+                                displayValue = poiCell.stringCellValue ?: ""
+                                rawValue = displayValue
+                                cellType = CellType.STRING
+                            }
+                            org.apache.poi.ss.usermodel.CellType.NUMERIC -> {
+                                if (DateUtil.isCellDateFormatted(poiCell)) {
+                                    val dateVal = poiCell.dateCellValue
+                                    displayValue = dateVal?.toString() ?: ""
+                                    rawValue = displayValue
+                                    cellType = CellType.DATE
+                                } else {
+                                    val numVal = poiCell.numericCellValue
+                                    displayValue = formatNumericValue(numVal.toString())
+                                    rawValue = numVal.toString()
+                                    cellType = CellType.NUMBER
+                                }
+                            }
+                            org.apache.poi.ss.usermodel.CellType.BOOLEAN -> {
+                                displayValue = if (poiCell.booleanCellValue) "TRUE" else "FALSE"
+                                rawValue = if (poiCell.booleanCellValue) "1" else "0"
+                                cellType = CellType.BOOLEAN
+                            }
+                            org.apache.poi.ss.usermodel.CellType.FORMULA -> {
+                                cellType = CellType.FORMULA
+                                runCatching {
+                                    rawValue = "=" + poiCell.cellFormula
+                                    val evaluator = workbook.creationHelper.createFormulaEvaluator()
+                                    val evalValue = evaluator.evaluate(poiCell)
+                                    displayValue = when (evalValue.cellType) {
+                                        org.apache.poi.ss.usermodel.CellType.NUMERIC -> formatNumericValue(evalValue.numberValue.toString())
+                                        org.apache.poi.ss.usermodel.CellType.STRING -> evalValue.stringValue ?: ""
+                                        org.apache.poi.ss.usermodel.CellType.BOOLEAN -> if (evalValue.booleanValue) "TRUE" else "FALSE"
+                                        else -> ""
+                                    }
+                                }.onFailure {
+                                    rawValue = "=" + (runCatching { poiCell.cellFormula }.getOrNull() ?: "")
+                                    displayValue = runCatching { poiCell.richStringCellValue.string }.getOrNull() ?: ""
+                                }
+                            }
+                            org.apache.poi.ss.usermodel.CellType.BLANK -> {
+                                displayValue = ""
+                                rawValue = ""
+                                cellType = CellType.BLANK
+                            }
+                            else -> {
+                                displayValue = ""
+                                rawValue = ""
+                                cellType = CellType.BLANK
+                            }
+                        }
+
+                        cells[colIdx] = SpreadsheetCell(
+                            value = displayValue,
+                            rawValue = rawValue,
+                            type = cellType,
+                            styleIndex = styleIndex
+                        )
+                    }
+                    rows.add(SpreadsheetRow(rowIndex = rowIdx, cells = cells))
+                }
+
+                val mergedRegions = mutableListOf<MergedRegion>()
+                for (i in 0 until poiSheet.numMergedRegions) {
+                    val range = poiSheet.getMergedRegion(i)
+                    mergedRegions.add(
+                        MergedRegion(
+                            startRow = range.firstRow,
+                            endRow = range.lastRow,
+                            startCol = range.firstColumn,
+                            endCol = range.lastColumn
+                        )
+                    )
+                }
+
+                val finalColCount = maxCol.coerceAtLeast(10)
+                val finalRowCount = rowCount.coerceAtLeast(20)
+
+                for (col in 0 until finalColCount) {
+                    if (!columnWidths.containsKey(col)) {
+                        columnWidths[col] = 100f
+                    }
+                }
+
+                sheets.add(
+                    SpreadsheetSheet(
+                        name = sheetName,
+                        rows = rows,
+                        columnCount = finalColCount,
+                        rowCount = finalRowCount,
+                        columnWidths = columnWidths,
+                        mergedRegions = mergedRegions
+                    )
+                )
+            }
+
+            return DocumentContent.SpreadsheetContent(
+                sheets = sheets,
+                styles = styles
+            )
+        }
+    }
+
+    private fun fontColorToHex(font: HSSFFont, palette: HSSFPalette?): String? {
+        val colorIndex = font.color
+        if (colorIndex == org.apache.poi.hssf.util.HSSFColor.HSSFColorPredefined.AUTOMATIC.index) {
+            return null
+        }
+        val color = palette?.getColor(colorIndex) ?: return null
+        val triplets = color.triplet ?: return null
+        if (triplets.size < 3) return null
+        return String.format("#%02X%02X%02X", triplets[0].toInt() and 0xFF, triplets[1].toInt() and 0xFF, triplets[2].toInt() and 0xFF)
+    }
+
+    private fun fillPatternToHex(style: org.apache.poi.ss.usermodel.CellStyle, palette: HSSFPalette?): String? {
+        if (style.fillPattern == FillPatternType.NO_FILL) return null
+        val colorIndex = style.fillForegroundColor
+        if (colorIndex == org.apache.poi.hssf.util.HSSFColor.HSSFColorPredefined.AUTOMATIC.index) {
+            return null
+        }
+        val color = palette?.getColor(colorIndex) ?: return null
+        val triplets = color.triplet ?: return null
+        if (triplets.size < 3) return null
+        return String.format("#%02X%02X%02X", triplets[0].toInt() and 0xFF, triplets[1].toInt() and 0xFF, triplets[2].toInt() and 0xFF)
     }
 
     /**

@@ -110,7 +110,8 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     }
                     DocumentKind.Spreadsheet -> when (request.extension) {
                         "xlsx" -> XlsxParser.parse(request.path)
-                        else -> DocumentContent.UnsupportedContent("Legacy XLS editing is not supported. Use XLSX for offline editing.")
+                        "xls" -> XlsxParser.parseXls(request.path)
+                        else -> DocumentContent.UnsupportedContent("Unsupported spreadsheet format.")
                     }
                     DocumentKind.Presentation -> when (request.extension) {
                         "pptx" -> DocumentContent.OfficeTextContent(DocumentFileIo.readPptxText(request.path))
@@ -416,20 +417,31 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                             DocumentFileIo.writeCsv(localPath, csvRows)
                         }
                     }
-                    current.request.extension == "xlsx" && current.content is DocumentContent.SpreadsheetContent -> {
-                        // Build edited cells map for the active sheet
+                    (current.request.extension == "xlsx" || current.request.extension == "xls") && current.content is DocumentContent.SpreadsheetContent -> {
                         val sheetEditedCells = current.editedCells.filter { (key, _) ->
                             key.startsWith("${current.activeSheetIndex}:")
                         }.mapKeys { (key, _) ->
-                            // Remove the sheet index prefix: "sheetIdx:row:col" -> "row:col"
                             key.substringAfter(":")
                         }
-                        DocumentFileIo.writeXlsxSheet(
-                            localPath,
-                            current.activeSheetIndex,
-                            sheetEditedCells,
-                            current.content
-                        )
+                        val file = File(localPath)
+                        val isZip = file.exists() && file.length() >= 4 && file.inputStream().use { fis ->
+                            val b = ByteArray(2)
+                            fis.read(b) == 2 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte()
+                        }
+                        if (isZip) {
+                            DocumentFileIo.writeXlsxSheet(
+                                localPath,
+                                current.activeSheetIndex,
+                                sheetEditedCells,
+                                current.content
+                            )
+                        } else {
+                            DocumentFileIo.writeXlsSheet(
+                                localPath,
+                                current.activeSheetIndex,
+                                sheetEditedCells
+                            )
+                        }
                     }
                     current.request.extension == "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
                     current.request.extension == "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
@@ -451,6 +463,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             result.onSuccess {
                 val savedContent = when {
                     current.request.extension == "xlsx" -> XlsxParser.parse(localPath)
+                    current.request.extension == "xls" -> XlsxParser.parseXls(localPath)
                     current.request.extension == "csv" -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(localPath))
                     current.request.extension == "docx" -> DocxParser.parseDocx(localPath)
                     else -> DocumentContent.TextContent(
@@ -620,22 +633,26 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             }
             is DocumentContent.SpreadsheetContent -> {
                 val matches = mutableListOf<SearchMatch>()
-                val sheet = content.sheets.getOrNull(state.activeSheetIndex) ?: return emptyList()
-                sheet.rows.forEach { row ->
-                    row.cells.forEach { (colIdx, cell) ->
-                        val editKey = "${state.activeSheetIndex}:${row.rowIndex}:$colIdx"
-                        val text = state.editedCells[editKey] ?: cell.value
-                        var start = 0
-                        while (true) {
-                            val index = text.indexOf(query, start, ignoreCase = true)
-                            if (index < 0) break
-                            val cellRef = "${XlsxParser.columnName(colIdx)}${row.rowIndex + 1}"
-                            matches += SearchMatch(
-                                index = index,
-                                preview = "$cellRef: $text",
-                                pageIndex = 0
-                            )
-                            start = index + query.length
+                content.sheets.forEachIndexed { sheetIdx, sheet ->
+                    sheet.rows.forEach { row ->
+                        row.cells.forEach { (colIdx, cell) ->
+                            val editKey = "$sheetIdx:${row.rowIndex}:$colIdx"
+                            val text = state.editedCells[editKey] ?: cell.value
+                            var start = 0
+                            while (true) {
+                                val index = text.indexOf(query, start, ignoreCase = true)
+                                if (index < 0) break
+                                val cellRef = "${XlsxParser.columnName(colIdx)}${row.rowIndex + 1}"
+                                matches += SearchMatch(
+                                    index = index,
+                                    preview = "[${sheet.name}] $cellRef: $text",
+                                    pageIndex = 0,
+                                    sheetIndex = sheetIdx,
+                                    rowIndex = row.rowIndex,
+                                    colIndex = colIdx
+                                )
+                                start = index + query.length
+                            }
                         }
                     }
                 }
