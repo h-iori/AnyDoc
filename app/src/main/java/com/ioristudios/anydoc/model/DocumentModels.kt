@@ -48,8 +48,67 @@ sealed class DocumentContent {
          */
         val pageTexts: List<String> = emptyList()
     ) : DocumentContent()
+    data class SpreadsheetContent(
+        val sheets: List<SpreadsheetSheet>,
+        val styles: List<SpreadsheetStyle> = emptyList(),
+        val activeSheetIndex: Int = 0
+    ) : DocumentContent()
     data class UnsupportedContent(val message: String) : DocumentContent()
 }
+
+// ─── Spreadsheet Models ──────────────────────────────────────────────────────
+
+enum class CellType { STRING, NUMBER, BOOLEAN, DATE, FORMULA, BLANK }
+
+enum class SpreadsheetAlignment { GENERAL, LEFT, CENTER, RIGHT }
+
+data class CellBorders(
+    val top: Boolean = false,
+    val bottom: Boolean = false,
+    val left: Boolean = false,
+    val right: Boolean = false
+)
+
+data class SpreadsheetStyle(
+    val fontBold: Boolean = false,
+    val fontItalic: Boolean = false,
+    val fontSize: Float = 11f,
+    val fontColor: String? = null,
+    val backgroundColor: String? = null,
+    val numberFormat: String? = null,
+    val horizontalAlignment: SpreadsheetAlignment = SpreadsheetAlignment.GENERAL,
+    val borders: CellBorders = CellBorders(),
+    val fontFamily: String? = null
+)
+
+data class SpreadsheetCell(
+    val value: String,
+    val rawValue: String = value,
+    val type: CellType = CellType.STRING,
+    val styleIndex: Int = -1
+)
+
+data class SpreadsheetRow(
+    val rowIndex: Int,
+    val cells: Map<Int, SpreadsheetCell>
+)
+
+data class MergedRegion(
+    val startRow: Int, val endRow: Int,
+    val startCol: Int, val endCol: Int
+)
+
+data class SpreadsheetSheet(
+    val name: String,
+    val rows: List<SpreadsheetRow>,
+    val columnCount: Int,
+    val rowCount: Int,
+    val frozenRows: Int = 0,
+    val frozenCols: Int = 0,
+    val columnWidths: Map<Int, Float> = emptyMap(),
+    val rowHeights: Map<Int, Float> = emptyMap(),
+    val mergedRegions: List<MergedRegion> = emptyList()
+)
 
 data class DocxSpan(
     val text: String,
@@ -138,7 +197,12 @@ sealed class DocumentViewerState {
         val message: String? = null,
         val isSaving: Boolean = false,
         val wordLayoutPages: List<com.ioristudios.anydoc.model.LayoutPage> = emptyList(),
-        val editedWordParagraphs: Map<Int, String> = emptyMap()
+        val editedWordParagraphs: Map<Int, String> = emptyMap(),
+        // Spreadsheet editing state
+        val activeSheetIndex: Int = 0,
+        val editedCells: Map<String, String> = emptyMap(),  // "sheetIdx:row:col" → value
+        val selectedCell: Pair<Int, Int>? = null,            // row, col
+        val formulaBarText: String = ""
     ) : DocumentViewerState()
 
     data class Error(

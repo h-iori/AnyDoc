@@ -461,6 +461,46 @@ fun FileViewerScreen(
             },
             snackbarHostState = snackbarHostState
         )
+    } else if (ready != null && ready.content is DocumentContent.SpreadsheetContent) {
+        // ─── Fullscreen Spreadsheet viewer ──────────────────────────────────
+        SpreadsheetFullscreenViewer(
+            state = ready,
+            isSearching = isSearching,
+            onBack = {
+                if (isExternal) {
+                    if (backPressedOnce) {
+                        (context as? Activity)?.finishAndRemoveTask()
+                    } else {
+                        backPressedOnce = true
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Double tap on back to exit", duration = SnackbarDuration.Short)
+                            delay(2000)
+                            backPressedOnce = false
+                        }
+                    }
+                } else {
+                    onBack()
+                }
+            },
+            onSearchOpen = { isSearching = true },
+            onSearchClose = {
+                viewModel.updateSearch("")
+                isSearching = false
+            },
+            onSearchQueryChange = viewModel::updateSearch,
+            onNextMatch = viewModel::nextMatch,
+            onPrevMatch = viewModel::prevMatch,
+            onEdit = { viewModel.enterEditMode() },
+            onExitEdit = { viewModel.exitEditMode() },
+            onSave = { viewModel.save() },
+            onCellEdit = { row, col, value -> viewModel.updateSpreadsheetCell(row, col, value) },
+            onSelectCell = { row, col -> viewModel.selectCell(row, col) },
+            onSwitchSheet = { index -> viewModel.switchSheet(index) },
+            onAddRow = { viewModel.addSpreadsheetRow() },
+            onAddColumn = { viewModel.addSpreadsheetColumn() },
+            onFormulaBarChange = { text -> viewModel.updateFormulaBar(text) },
+            snackbarHostState = snackbarHostState
+        )
     } else {
         // ─── Standard scaffold viewer (non-PDF or loading/error) ───────────
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()

@@ -101,7 +101,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         text = DocumentFileIo.readText(request.path),
                         isCodeLike = request.extension != "txt" && request.extension != "log"
                     )
-                    DocumentKind.Csv -> DocumentContent.CsvContent(DocumentFileIo.readCsv(request.path))
+                    DocumentKind.Csv -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(request.path))
                     DocumentKind.Word -> when (request.extension) {
                         "docx" -> DocxParser.parseDocx(request.path)
                         "doc" -> DocxParser.parseDoc(request.path)
@@ -109,7 +109,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         else -> DocumentContent.UnsupportedContent("Unsupported Word format.")
                     }
                     DocumentKind.Spreadsheet -> when (request.extension) {
-                        "xlsx" -> DocumentContent.CsvContent(DocumentFileIo.readXlsxRows(request.path))
+                        "xlsx" -> XlsxParser.parse(request.path)
                         else -> DocumentContent.UnsupportedContent("Legacy XLS editing is not supported. Use XLSX for offline editing.")
                     }
                     DocumentKind.Presentation -> when (request.extension) {
@@ -133,7 +133,8 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     editedText = initialEditableText(content),
                     editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
                     wordLayoutPages = wordLayoutPages,
-                    editedWordParagraphs = editedWordParasMap
+                    editedWordParagraphs = editedWordParasMap,
+                    activeSheetIndex = 0
                 )
             }.onSuccess { ready ->
                 _uiState.value = ready
@@ -304,6 +305,91 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         _uiState.value = current.copy(editedRows = source.map { it + "" })
     }
 
+    // ─── Spreadsheet-specific operations ─────────────────────────────────────
+
+    fun switchSheet(sheetIndex: Int) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val content = current.content as? DocumentContent.SpreadsheetContent ?: return
+        if (sheetIndex < 0 || sheetIndex >= content.sheets.size) return
+        _uiState.value = current.copy(
+            activeSheetIndex = sheetIndex,
+            selectedCell = null,
+            formulaBarText = ""
+        )
+    }
+
+    fun selectCell(row: Int, col: Int) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val content = current.content as? DocumentContent.SpreadsheetContent ?: return
+        val sheet = content.sheets.getOrNull(current.activeSheetIndex) ?: return
+        val cell = sheet.rows.find { it.rowIndex == row }?.cells?.get(col)
+        val editKey = "${current.activeSheetIndex}:$row:$col"
+        val displayValue = current.editedCells[editKey] ?: cell?.rawValue ?: cell?.value ?: ""
+        _uiState.value = current.copy(
+            selectedCell = Pair(row, col),
+            formulaBarText = displayValue
+        )
+    }
+
+    fun updateSpreadsheetCell(row: Int, col: Int, value: String) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val editKey = "${current.activeSheetIndex}:$row:$col"
+        val newEditedCells = current.editedCells.toMutableMap().apply {
+            put(editKey, value)
+        }
+        _uiState.value = current.copy(editedCells = newEditedCells)
+    }
+
+    fun updateFormulaBar(text: String) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        _uiState.value = current.copy(formulaBarText = text)
+        // Also apply to selected cell
+        current.selectedCell?.let { (row, col) ->
+            val editKey = "${current.activeSheetIndex}:$row:$col"
+            val newEditedCells = current.editedCells.toMutableMap().apply {
+                put(editKey, text)
+            }
+            _uiState.value = (_uiState.value as? DocumentViewerState.Ready)?.copy(editedCells = newEditedCells) ?: return
+        }
+    }
+
+    fun addSpreadsheetRow() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        if (!current.isEditing) return
+        val content = current.content as? DocumentContent.SpreadsheetContent ?: return
+        val sheet = content.sheets.getOrNull(current.activeSheetIndex) ?: return
+        val newRow = SpreadsheetRow(
+            rowIndex = sheet.rowCount,
+            cells = emptyMap()
+        )
+        val updatedSheet = sheet.copy(
+            rows = sheet.rows + newRow,
+            rowCount = sheet.rowCount + 1
+        )
+        val updatedSheets = content.sheets.toMutableList().apply {
+            set(current.activeSheetIndex, updatedSheet)
+        }
+        _uiState.value = current.copy(
+            content = content.copy(sheets = updatedSheets)
+        )
+    }
+
+    fun addSpreadsheetColumn() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        if (!current.isEditing) return
+        val content = current.content as? DocumentContent.SpreadsheetContent ?: return
+        val sheet = content.sheets.getOrNull(current.activeSheetIndex) ?: return
+        val updatedSheet = sheet.copy(
+            columnCount = sheet.columnCount + 1
+        )
+        val updatedSheets = content.sheets.toMutableList().apply {
+            set(current.activeSheetIndex, updatedSheet)
+        }
+        _uiState.value = current.copy(
+            content = content.copy(sheets = updatedSheets)
+        )
+    }
+
     fun save() {
         val current = _uiState.value as? DocumentViewerState.Ready ?: return
         if (!current.request.canEdit) {
@@ -315,10 +401,39 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch(Dispatchers.IO) {
             val localPath = current.request.path
             val result = runCatching {
-                when (current.request.extension) {
-                    "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
-                    "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
-                    "docx" -> DocumentFileIo.writeDocxInPlace(localPath, current.editedWordParagraphs)
+                when {
+                    current.request.extension == "csv" && current.content is DocumentContent.SpreadsheetContent -> {
+                        // Convert SpreadsheetContent back to CSV rows for saving
+                        val sheet = current.content.sheets.getOrNull(current.activeSheetIndex)
+                        if (sheet != null) {
+                            val csvRows = (0 until sheet.rowCount).map { rowIdx ->
+                                val row = sheet.rows.find { it.rowIndex == rowIdx }
+                                (0 until sheet.columnCount).map { colIdx ->
+                                    val editKey = "${current.activeSheetIndex}:$rowIdx:$colIdx"
+                                    current.editedCells[editKey] ?: row?.cells?.get(colIdx)?.value ?: ""
+                                }
+                            }
+                            DocumentFileIo.writeCsv(localPath, csvRows)
+                        }
+                    }
+                    current.request.extension == "xlsx" && current.content is DocumentContent.SpreadsheetContent -> {
+                        // Build edited cells map for the active sheet
+                        val sheetEditedCells = current.editedCells.filter { (key, _) ->
+                            key.startsWith("${current.activeSheetIndex}:")
+                        }.mapKeys { (key, _) ->
+                            // Remove the sheet index prefix: "sheetIdx:row:col" -> "row:col"
+                            key.substringAfter(":")
+                        }
+                        DocumentFileIo.writeXlsxSheet(
+                            localPath,
+                            current.activeSheetIndex,
+                            sheetEditedCells,
+                            current.content
+                        )
+                    }
+                    current.request.extension == "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
+                    current.request.extension == "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
+                    current.request.extension == "docx" -> DocumentFileIo.writeDocxInPlace(localPath, current.editedWordParagraphs)
                     else -> DocumentFileIo.writeText(localPath, current.editedText)
                 }
 
@@ -334,9 +449,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             }
 
             result.onSuccess {
-                val savedContent = when (current.request.extension) {
-                    "csv", "xlsx" -> DocumentContent.CsvContent(current.editedRows)
-                    "docx" -> DocxParser.parseDocx(localPath)
+                val savedContent = when {
+                    current.request.extension == "xlsx" -> XlsxParser.parse(localPath)
+                    current.request.extension == "csv" -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(localPath))
+                    current.request.extension == "docx" -> DocxParser.parseDocx(localPath)
                     else -> DocumentContent.TextContent(
                         text = current.editedText,
                         isCodeLike = (current.content as? DocumentContent.TextContent)?.isCodeLike == true
@@ -358,7 +474,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     isEditing = false,
                     message = "Saved changes.",
                     wordLayoutPages = savedLayoutPages,
-                    editedWordParagraphs = editedWordParasMap
+                    editedWordParagraphs = editedWordParasMap,
+                    editedCells = emptyMap(),
+                    selectedCell = null,
+                    formulaBarText = ""
                 )
             }.onFailure { error ->
                 _uiState.value = current.copy(
@@ -443,6 +562,11 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         is DocumentContent.OfficeTextContent -> content.sections.joinToString("\n\n")
         is DocumentContent.CsvContent -> DocumentFileIo.flattenRows(content.rows)
         is DocumentContent.WordDocumentContent -> content.plainText
+        is DocumentContent.SpreadsheetContent -> {
+            content.sheets.firstOrNull()?.rows?.joinToString("\n") { row ->
+                row.cells.values.joinToString("\t") { it.value }
+            }.orEmpty()
+        }
         else -> ""
     }
 
@@ -490,6 +614,29 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                             pageIndex = pageIdx
                         )
                         start = index + query.length
+                    }
+                }
+                matches
+            }
+            is DocumentContent.SpreadsheetContent -> {
+                val matches = mutableListOf<SearchMatch>()
+                val sheet = content.sheets.getOrNull(state.activeSheetIndex) ?: return emptyList()
+                sheet.rows.forEach { row ->
+                    row.cells.forEach { (colIdx, cell) ->
+                        val editKey = "${state.activeSheetIndex}:${row.rowIndex}:$colIdx"
+                        val text = state.editedCells[editKey] ?: cell.value
+                        var start = 0
+                        while (true) {
+                            val index = text.indexOf(query, start, ignoreCase = true)
+                            if (index < 0) break
+                            val cellRef = "${XlsxParser.columnName(colIdx)}${row.rowIndex + 1}"
+                            matches += SearchMatch(
+                                index = index,
+                                preview = "$cellRef: $text",
+                                pageIndex = 0
+                            )
+                            start = index + query.length
+                        }
                     }
                 }
                 matches

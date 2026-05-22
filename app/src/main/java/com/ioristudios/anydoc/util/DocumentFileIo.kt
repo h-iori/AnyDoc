@@ -218,6 +218,139 @@ object DocumentFileIo {
         replaceZipEntry(path, "xl/worksheets/sheet1.xml", sheet.toByteArray(utf8))
     }
 
+    /**
+     * Write edited cells to a specific sheet in the XLSX file.
+     *
+     * This rebuilds the sheet XML using inline strings for edited cells
+     * and preserves other data. The [sheetIndex] is 0-based.
+     * [editedCells] maps "row:col" → new value.
+     * [originalContent] provides the full parsed sheet for preserving unedited cells.
+     */
+    fun writeXlsxSheet(
+        path: String,
+        sheetIndex: Int,
+        editedCells: Map<String, String>,
+        originalContent: com.ioristudios.anydoc.model.DocumentContent.SpreadsheetContent
+    ) {
+        val sheet = originalContent.sheets.getOrNull(sheetIndex) ?: return
+
+        // Discover sheet path from workbook rels
+        val sheetPath = discoverSheetPath(path, sheetIndex)
+
+        // Build cell map: start from original, apply edits
+        val cellMap = mutableMapOf<Int, MutableMap<Int, String>>() // row -> (col -> value)
+        for (row in sheet.rows) {
+            val rowMap = cellMap.getOrPut(row.rowIndex) { mutableMapOf() }
+            for ((colIdx, cell) in row.cells) {
+                rowMap[colIdx] = cell.value
+            }
+        }
+
+        // Apply edits
+        for ((key, value) in editedCells) {
+            val parts = key.split(":")
+            if (parts.size == 2) {
+                val row = parts[0].toIntOrNull() ?: continue
+                val col = parts[1].toIntOrNull() ?: continue
+                val rowMap = cellMap.getOrPut(row) { mutableMapOf() }
+                rowMap[col] = value
+            }
+        }
+
+        // Build XML
+        val xml = buildString {
+            append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""")
+            append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">""")
+
+            // Preserve column definitions
+            if (sheet.columnWidths.isNotEmpty()) {
+                append("<cols>")
+                sheet.columnWidths.entries.sortedBy { it.key }.forEach { (colIdx, width) ->
+                    val colNum = colIdx + 1
+                    append("""<col min="$colNum" max="$colNum" width="$width" customWidth="1"/>""")
+                }
+                append("</cols>")
+            }
+
+            append("<sheetData>")
+            val sortedRows = cellMap.keys.sorted()
+            for (rowIdx in sortedRows) {
+                val excelRow = rowIdx + 1
+                val rowCells = cellMap[rowIdx] ?: continue
+                append("""<row r="$excelRow">""")
+                for (colIdx in rowCells.keys.sorted()) {
+                    val value = rowCells[colIdx] ?: ""
+                    val cellRef = "${columnName(colIdx)}$excelRow"
+                    append("""<c r="$cellRef" t="inlineStr"><is><t xml:space="preserve">""")
+                    append(escapeXml(value))
+                    append("</t></is></c>")
+                }
+                append("</row>")
+            }
+            append("</sheetData>")
+
+            // Preserve merge cells
+            if (sheet.mergedRegions.isNotEmpty()) {
+                append("""<mergeCells count="${sheet.mergedRegions.size}">""")
+                for (region in sheet.mergedRegions) {
+                    val startRef = "${columnName(region.startCol)}${region.startRow + 1}"
+                    val endRef = "${columnName(region.endCol)}${region.endRow + 1}"
+                    append("""<mergeCell ref="$startRef:$endRef"/>""")
+                }
+                append("</mergeCells>")
+            }
+
+            append("</worksheet>")
+        }
+
+        replaceZipEntry(path, sheetPath, xml.toByteArray(utf8))
+    }
+
+    private fun discoverSheetPath(path: String, sheetIndex: Int): String {
+        val defaultPath = "xl/worksheets/sheet${sheetIndex + 1}.xml"
+        return runCatching {
+            val relsXml = readZipEntry(path, "xl/_rels/workbook.xml.rels") ?: return defaultPath
+            val wbXml = readZipEntry(path, "xl/workbook.xml") ?: return defaultPath
+
+            val db = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = true
+            }.newDocumentBuilder()
+
+            // Get rId for the sheet
+            val wbDoc = db.parse(java.io.ByteArrayInputStream(wbXml.toByteArray(utf8)))
+            val sheetNodes = wbDoc.getElementsByTagName("sheet")
+            val rId = if (sheetIndex < sheetNodes.length) {
+                val node = sheetNodes.item(sheetIndex)
+                node.attributes?.getNamedItemNS(
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"
+                )?.nodeValue
+                    ?: node.attributes?.getNamedItem("r:id")?.nodeValue
+                    ?: return defaultPath
+            } else {
+                return defaultPath
+            }
+
+            // Resolve rId to file path
+            val relsDoc = db.parse(java.io.ByteArrayInputStream(relsXml.toByteArray(utf8)))
+            val relNodes = relsDoc.getElementsByTagName("Relationship")
+            for (i in 0 until relNodes.length) {
+                val relNode = relNodes.item(i)
+                val id = relNode.attributes?.getNamedItem("Id")?.nodeValue
+                if (id == rId) {
+                    val target = relNode.attributes?.getNamedItem("Target")?.nodeValue ?: return defaultPath
+                    return if (target.startsWith("/")) {
+                        target.substring(1)
+                    } else if (!target.startsWith("xl/")) {
+                        "xl/$target"
+                    } else {
+                        target
+                    }
+                }
+            }
+            defaultPath
+        }.getOrDefault(defaultPath)
+    }
+
     fun readPptxText(path: String): List<String> {
         ZipFile(path).use { zip ->
             return zip.entries().asSequence()
