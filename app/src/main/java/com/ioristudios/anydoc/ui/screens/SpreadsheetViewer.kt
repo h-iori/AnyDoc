@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -65,6 +66,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,6 +105,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.ui.draw.clipToBounds
@@ -111,6 +114,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 // ─── Excel-themed color palette ─────────────────────────────────────────────
 
@@ -182,17 +186,18 @@ fun SpreadsheetFullscreenViewer(
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val topContentOffset = TOP_BAR_HEIGHT + statusBarPadding
 
-    var barsVisible by remember { mutableStateOf(true) }
+    var barsVisible by rememberSaveable { mutableStateOf(true) }
     val listState = rememberLazyListState()
-    var scrollX by remember { mutableFloatStateOf(0f) }
+    var scrollX by rememberSaveable { mutableFloatStateOf(0f) }
 
     // Zoom / pan state
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offsetX by remember { mutableFloatStateOf(0f) }
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    var scale by rememberSaveable { mutableFloatStateOf(1f) }
+    var gestureScale by remember { mutableFloatStateOf(1f) }
+    var gesturePanX by remember { mutableFloatStateOf(0f) }
+    var gesturePanY by remember { mutableFloatStateOf(0f) }
+    
     var isMultiTouch by remember { mutableStateOf(false) }
     var flingJobX by remember { mutableStateOf<Job?>(null) }
-    var flingJobY by remember { mutableStateOf<Job?>(null) }
 
     var containerWidthPx by remember { mutableFloatStateOf(0f) }
     var containerHeightPx by remember { mutableFloatStateOf(0f) }
@@ -210,11 +215,40 @@ fun SpreadsheetFullscreenViewer(
         label = "topPadding"
     )
 
-    val totalColumnWidthDp = remember(layout.columnWidths) {
-        layout.columnWidths.sum()
+    val columnOffsets = remember(layout.columnWidths) {
+        val offsets = FloatArray(layout.columnWidths.size + 1)
+        var current = 0f
+        offsets[0] = 0f
+        for (i in layout.columnWidths.indices) {
+            current += layout.columnWidths[i]
+            offsets[i + 1] = current
+        }
+        offsets
     }
-    val totalColumnWidthPx = with(density) { totalColumnWidthDp.dp.toPx() }
-    val rowHeaderWidthPx = with(density) { SpreadsheetLayoutEngine.ROW_HEADER_WIDTH_DP.dp.toPx() }
+    val totalColumnWidthDp = columnOffsets.last()
+
+    val effectiveScale = scale * gestureScale
+    val scaledRowHeaderWidthDp = SpreadsheetLayoutEngine.ROW_HEADER_WIDTH_DP * effectiveScale
+    val scaledColHeaderHeightDp = SpreadsheetLayoutEngine.COLUMN_HEADER_HEIGHT_DP * effectiveScale
+    val totalColumnWidthPx = with(density) { (totalColumnWidthDp * scale).dp.toPx() } // Unscaled for layout bounds
+    val rowHeaderWidthPx = with(density) { scaledRowHeaderWidthDp.dp.toPx() }
+    
+    // Calculate visible column indices based on scrollX
+    val cellViewportWidthDp = with(density) { (containerWidthPx - rowHeaderWidthPx).toDp().value }.coerceAtLeast(0f)
+    val scrollXDp = with(density) { scrollX.toDp().value }
+    
+    val startVisibleDp = scrollXDp / scale
+    val endVisibleDp = (scrollXDp + cellViewportWidthDp / gestureScale) / scale
+
+    val firstVisibleColIndex = remember(columnOffsets, startVisibleDp) {
+        val idx = columnOffsets.binarySearch(startVisibleDp)
+        if (idx >= 0) idx else -idx - 2
+    }.coerceAtLeast(0)
+
+    val lastVisibleColIndex = remember(columnOffsets, endVisibleDp) {
+        val idx = columnOffsets.binarySearch(endVisibleDp)
+        if (idx >= 0) idx else -idx - 1
+    }.coerceAtMost(layout.columnWidths.size - 1).coerceAtLeast(0)
 
     // Auto-navigate to search match
     LaunchedEffect(state.activeMatch, state.activeSheetIndex, state.searchMatches, containerWidthPx) {
@@ -235,7 +269,6 @@ fun SpreadsheetFullscreenViewer(
                 onSelectCell(match.rowIndex, match.colIndex)
                 
                 // 3. Scroll vertically to the rowIndex
-                flingJobY?.cancel()
                 coroutineScope.launch {
                     listState.animateScrollToItem(
                         index = match.rowIndex,
@@ -249,12 +282,12 @@ fun SpreadsheetFullscreenViewer(
                     var targetLeftPx = 0f
                     for (i in 0 until match.colIndex) {
                         val colWidth = layout.columnWidths.getOrNull(i) ?: SpreadsheetLayoutEngine.DEFAULT_COLUMN_WIDTH_DP
-                        targetLeftPx += with(density) { colWidth.dp.toPx() }
+                        targetLeftPx += with(density) { (colWidth * scale).dp.toPx() }
                     }
                     
                     val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
                     val colWidth = layout.columnWidths.getOrNull(match.colIndex) ?: SpreadsheetLayoutEngine.DEFAULT_COLUMN_WIDTH_DP
-                    val colWidthPx = with(density) { colWidth.dp.toPx() }
+                    val colWidthPx = with(density) { (colWidth * scale).dp.toPx() }
                     
                     val targetScrollX = (targetLeftPx - cellViewportWidth / 2f + colWidthPx / 2f)
                         .coerceIn(0f, (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f))
@@ -317,11 +350,10 @@ fun SpreadsheetFullscreenViewer(
                         containerWidthPx = coordinates.size.width.toFloat()
                         containerHeightPx = coordinates.size.height.toFloat()
                     }
-                    .pointerInput(totalColumnWidthPx, scale) {
+                    .pointerInput(Unit) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             flingJobX?.cancel()
-                            flingJobY?.cancel()
                             val velocityTracker = VelocityTracker()
                             velocityTracker.addPosition(down.uptimeMillis, down.position)
 
@@ -336,52 +368,45 @@ fun SpreadsheetFullscreenViewer(
 
                                 if (activeChanges.isEmpty()) {
                                     val velocity = velocityTracker.calculateVelocity()
-                                    val maxPanX = ((containerWidthPx * scale) - containerWidthPx).coerceAtLeast(0f) / 2f
-                                    val maxPanY = ((containerHeightPx * scale) - containerHeightPx).coerceAtLeast(0f) / 2f
+                                    
+                                    // Commit zoom phase
+                                    if (gestureScale != 1f) {
+                                        val newScale = (scale * gestureScale).coerceIn(0.25f, 5f)
+                                        val newScrollX = scrollX * gestureScale - gesturePanX
+                                        
+                                        // Calculate max scroll for new scale
+                                        val newTotalPx = with(density) { (totalColumnWidthDp * newScale).dp.toPx() }
+                                        val viewport = (containerWidthPx - with(density) { (SpreadsheetLayoutEngine.ROW_HEADER_WIDTH_DP * newScale).dp.toPx() }).coerceAtLeast(0f)
+                                        val maxScrollX = (newTotalPx - viewport).coerceAtLeast(0f)
+                                        
+                                        scrollX = newScrollX.coerceIn(0f, maxScrollX)
+                                        scale = newScale
+                                        
+                                        val finalPanY = gesturePanY
+                                        gestureScale = 1f
+                                        gesturePanX = 0f
+                                        gesturePanY = 0f
+                                        
+                                        if (finalPanY != 0f) {
+                                            coroutineScope.launch {
+                                                listState.animateScrollBy(-finalPanY)
+                                            }
+                                        }
+                                        
+                                        isMultiTouch = false
+                                        break
+                                    }
+                                    
+                                    if (isHorizontalDrag) {
+                                        val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
+                                        val maxScrollX = (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f)
 
-                                    if (scale > 1.05f) {
                                         flingJobX = coroutineScope.launch {
-                                            Animatable(offsetX).animateDecay(
-                                                initialVelocity = velocity.x,
+                                            Animatable(scrollX).animateDecay(
+                                                initialVelocity = -velocity.x,
                                                 animationSpec = exponentialDecay()
                                             ) {
-                                                offsetX = this.value.coerceIn(-maxPanX, maxPanX)
-                                            }
-                                        }
-                                        flingJobY = coroutineScope.launch {
-                                            var lastValue = offsetY
-                                            Animatable(offsetY).animateDecay(
-                                                initialVelocity = velocity.y,
-                                                animationSpec = exponentialDecay()
-                                            ) {
-                                                val delta = this.value - lastValue
-                                                lastValue = this.value
-                                                val newOffsetY = offsetY + delta
-                                                if (newOffsetY > maxPanY) {
-                                                    offsetY = maxPanY
-                                                    val overscroll = newOffsetY - maxPanY
-                                                    listState.dispatchRawDelta(-overscroll)
-                                                } else if (newOffsetY < -maxPanY) {
-                                                    offsetY = -maxPanY
-                                                    val overscroll = newOffsetY - (-maxPanY)
-                                                    listState.dispatchRawDelta(-overscroll)
-                                                } else {
-                                                    offsetY = newOffsetY
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        if (isHorizontalDrag) {
-                                            val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
-                                            val maxScrollX = (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f)
-
-                                            flingJobX = coroutineScope.launch {
-                                                Animatable(scrollX).animateDecay(
-                                                    initialVelocity = -velocity.x,
-                                                    animationSpec = exponentialDecay()
-                                                ) {
-                                                    scrollX = this.value.coerceIn(0f, maxScrollX)
-                                                }
+                                                scrollX = this.value.coerceIn(0f, maxScrollX)
                                             }
                                         }
                                     }
@@ -394,65 +419,48 @@ fun SpreadsheetFullscreenViewer(
 
                                 if (isMulti) {
                                     val centroid = event.calculateCentroid(useCurrent = false)
-                                    val center = Offset(containerWidthPx / 2f, containerHeightPx / 2f)
                                     val zoom = event.calculateZoom()
                                     val pan = event.calculatePan()
-                                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                    val scaleChange = newScale / scale
-
-                                    if (newScale > 1f) {
-                                        val maxPanX = ((containerWidthPx * newScale) - containerWidthPx).coerceAtLeast(0f) / 2f
-                                        val maxPanY = ((containerHeightPx * newScale) - containerHeightPx).coerceAtLeast(0f) / 2f
-                                        offsetX = (offsetX * scaleChange - (centroid.x - center.x) * (scaleChange - 1) + pan.x).coerceIn(-maxPanX, maxPanX)
-                                        offsetY = (offsetY * scaleChange - (centroid.y - center.y) * (scaleChange - 1) + pan.y).coerceIn(-maxPanY, maxPanY)
-                                        scale = newScale
-                                    } else {
-                                        scale = 1f; offsetX = 0f; offsetY = 0f
-                                    }
+                                    
+                                    val newGestureScale = gestureScale * zoom
+                                    val projectedScale = (scale * newGestureScale).coerceIn(0.25f, 5f)
+                                    val actualNewGestureScale = projectedScale / scale
+                                    
+                                    val scaleFactor = actualNewGestureScale / gestureScale
+                                    
+                                    gesturePanX = gesturePanX * scaleFactor + centroid.x * (1 - scaleFactor) + pan.x
+                                    gesturePanY = gesturePanY * scaleFactor + centroid.y * (1 - scaleFactor) + pan.y
+                                    
+                                    gestureScale = actualNewGestureScale
                                     changes.forEach { it.consume() }
                                 } else {
                                     val pointer = activeChanges.first()
                                     velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
 
                                     val pan = event.calculatePan()
-                                    if (scale > 1f) {
-                                        val maxPanX = ((containerWidthPx * scale) - containerWidthPx).coerceAtLeast(0f) / 2f
-                                        val maxPanY = ((containerHeightPx * scale) - containerHeightPx).coerceAtLeast(0f) / 2f
-                                        offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
-
-                                        val newOffsetY = offsetY + pan.y
-                                        if (newOffsetY > maxPanY) {
-                                            offsetY = maxPanY
-                                            val overscroll = newOffsetY - maxPanY
-                                            listState.dispatchRawDelta(-overscroll)
-                                        } else if (newOffsetY < -maxPanY) {
-                                            offsetY = -maxPanY
-                                            val overscroll = newOffsetY - (-maxPanY)
-                                            listState.dispatchRawDelta(-overscroll)
-                                        } else {
-                                            offsetY = newOffsetY
-                                        }
-                                        changes.forEach { it.consume() }
-                                    } else {
-                                        if (!hasLockedDirection) {
-                                            if (kotlin.math.abs(pan.x) > 1f || kotlin.math.abs(pan.y) > 1f) {
-                                                hasLockedDirection = true
-                                                if (kotlin.math.abs(pan.x) > kotlin.math.abs(pan.y)) {
-                                                    isHorizontalDrag = true
-                                                } else {
-                                                    isVerticalDrag = true
-                                                }
+                                    
+                                    if (!hasLockedDirection && gestureScale == 1f) {
+                                        if (kotlin.math.abs(pan.x) > 1f || kotlin.math.abs(pan.y) > 1f) {
+                                            hasLockedDirection = true
+                                            if (kotlin.math.abs(pan.x) > kotlin.math.abs(pan.y)) {
+                                                isHorizontalDrag = true
+                                            } else {
+                                                isVerticalDrag = true
                                             }
                                         }
+                                    }
 
-                                        if (isHorizontalDrag) {
-                                            val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
-                                            val maxScrollX = (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f)
-                                            scrollX = (scrollX - pan.x).coerceIn(0f, maxScrollX)
-                                            changes.forEach { it.consume() }
-                                        } else if (isVerticalDrag) {
-                                            // Do not consume, let LazyColumn handle it natively
-                                        }
+                                    if (gestureScale != 1f) {
+                                        gesturePanX += pan.x
+                                        gesturePanY += pan.y
+                                        changes.forEach { it.consume() }
+                                    } else if (isHorizontalDrag) {
+                                        val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
+                                        val maxScrollX = (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f)
+                                        scrollX = (scrollX - pan.x).coerceIn(0f, maxScrollX)
+                                        changes.forEach { it.consume() }
+                                    } else if (isVerticalDrag) {
+                                        // let LazyColumn handle it natively
                                     }
                                 }
                             }
@@ -463,37 +471,43 @@ fun SpreadsheetFullscreenViewer(
                             onTap = { if (!isSearching && !state.isEditing) barsVisible = !barsVisible },
                             onDoubleTap = { tapOffset ->
                                 flingJobX?.cancel()
-                                flingJobY?.cancel()
                                 if (scale > 1.1f) {
-                                    scale = 1f; offsetX = 0f; offsetY = 0f
+                                    scale = 1f
                                 } else {
                                     val targetScale = 2.5f
-                                    val center = Offset(containerWidthPx / 2f, containerHeightPx / 2f)
-                                    val maxPanX = ((containerWidthPx * targetScale) - containerWidthPx).coerceAtLeast(0f) / 2f
-                                    val maxPanY = ((containerHeightPx * targetScale) - containerHeightPx).coerceAtLeast(0f) / 2f
-                                    offsetX = (-(tapOffset.x - center.x) * targetScale).coerceIn(-maxPanX, maxPanX)
-                                    offsetY = (-(tapOffset.y - center.y) * targetScale).coerceIn(-maxPanY, maxPanY)
+                                    val scaleFactor = targetScale / scale
+                                    val focalX = scrollX + (tapOffset.x - rowHeaderWidthPx)
+                                    val newScrollX = focalX * scaleFactor - (tapOffset.x - rowHeaderWidthPx)
+                                    
+                                    val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
+                                    val newTotalColumnWidthPx = totalColumnWidthDp * targetScale * density.density
+                                    val maxScrollX = (newTotalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f)
+                                    
+                                    scrollX = newScrollX.coerceIn(0f, maxScrollX)
                                     scale = targetScale
                                 }
                             }
                         )
                     }
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offsetX
-                        translationY = offsetY
-                        transformOrigin = TransformOrigin.Center
-                    }
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = gestureScale
+                            scaleY = gestureScale
+                            translationX = gesturePanX
+                            translationY = gesturePanY
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        }
+                ) {
                     // ── Column headers (frozen vertically, scrolls horizontally via scrollX offset) ──
                     Row(modifier = Modifier.fillMaxWidth()) {
                         // Corner cell
                         Box(
                             modifier = Modifier
-                                .width(SpreadsheetLayoutEngine.ROW_HEADER_WIDTH_DP.dp)
-                                .height(SpreadsheetLayoutEngine.COLUMN_HEADER_HEIGHT_DP.dp)
+                                .width(scaledRowHeaderWidthDp.dp)
+                                .height(scaledColHeaderHeightDp.dp)
                                 .background(ExcelUi.HeaderBackground)
                                 .border(0.5.dp, ExcelUi.HeaderBorder)
                         )
@@ -502,19 +516,23 @@ fun SpreadsheetFullscreenViewer(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(SpreadsheetLayoutEngine.COLUMN_HEADER_HEIGHT_DP.dp)
+                                .height(scaledColHeaderHeightDp.dp)
                                 .clipToBounds()
                         ) {
-                            Row(
+                            Box(
                                 modifier = Modifier
                                     .fillMaxHeight()
-                                    .graphicsLayer { translationX = -scrollX }
                             ) {
-                                layout.columnWidths.forEachIndexed { colIdx, colWidth ->
+                                for (colIdx in firstVisibleColIndex..lastVisibleColIndex) {
+                                    val colWidth = layout.columnWidths[colIdx]
+                                    val startOffset = columnOffsets[colIdx]
+                                    val startOffsetPx = with(density) { (startOffset * scale).dp.toPx() }
                                     val isSelected = state.selectedCell?.second == colIdx
+                                    
                                     Box(
                                         modifier = Modifier
-                                            .width(colWidth.dp)
+                                            .offset { IntOffset((startOffsetPx - scrollX).roundToInt(), 0) }
+                                            .width((colWidth * scale).dp)
                                             .fillMaxHeight()
                                             .background(if (isSelected) ExcelUi.SelectedHeaderBg else ExcelUi.HeaderBackground)
                                             .border(0.5.dp, ExcelUi.HeaderBorder),
@@ -523,7 +541,7 @@ fun SpreadsheetFullscreenViewer(
                                         Text(
                                             text = XlsxParser.columnName(colIdx),
                                             style = TextStyle(
-                                                fontSize = 11.sp,
+                                                fontSize = (11f * scale).sp,
                                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                                 color = if (isSelected) ExcelUi.ExcelGreen else ExcelUi.HeaderText,
                                                 textAlign = TextAlign.Center
@@ -539,25 +557,25 @@ fun SpreadsheetFullscreenViewer(
                     // ── Data grid cells and row headers ──
                     LazyColumn(
                         state = listState,
-                        userScrollEnabled = scale <= 1f && !isMultiTouch,
+                        userScrollEnabled = !isMultiTouch,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
                     ) {
                         items(activeSheet.rowCount.coerceAtLeast(1)) { rowIdx ->
                             val row = activeSheet.rows.find { it.rowIndex == rowIdx }
-                            val rowHeight = layout.rowHeights.getOrElse(rowIdx) { SpreadsheetLayoutEngine.DEFAULT_ROW_HEIGHT_DP }
+                            val scaledRowHeightDp = layout.rowHeights.getOrElse(rowIdx) { SpreadsheetLayoutEngine.DEFAULT_ROW_HEIGHT_DP } * scale
 
                             Row(
                                 modifier = Modifier
-                                    .height(rowHeight.dp)
+                                    .height(scaledRowHeightDp.dp)
                                     .fillMaxWidth()
                             ) {
                                 // Row number (frozen)
                                 val isRowSelected = state.selectedCell?.first == rowIdx
                                 Box(
                                     modifier = Modifier
-                                        .width(SpreadsheetLayoutEngine.ROW_HEADER_WIDTH_DP.dp)
+                                        .width(scaledRowHeaderWidthDp.dp)
                                         .fillMaxHeight()
                                         .background(if (isRowSelected) ExcelUi.SelectedHeaderBg else ExcelUi.HeaderBackground)
                                         .border(0.5.dp, ExcelUi.HeaderBorder),
@@ -566,7 +584,7 @@ fun SpreadsheetFullscreenViewer(
                                     Text(
                                         text = "${rowIdx + 1}",
                                         style = TextStyle(
-                                            fontSize = 11.sp,
+                                            fontSize = (11f * scale).sp,
                                             fontWeight = if (isRowSelected) FontWeight.Bold else FontWeight.Normal,
                                             color = if (isRowSelected) ExcelUi.ExcelGreen else ExcelUi.CellTextSecondary,
                                             textAlign = TextAlign.Center
@@ -582,28 +600,30 @@ fun SpreadsheetFullscreenViewer(
                                         .fillMaxHeight()
                                         .clipToBounds()
                                 ) {
-                                    Row(
+                                    Box(
                                         modifier = Modifier
                                             .fillMaxHeight()
-                                            .graphicsLayer { translationX = -scrollX }
                                     ) {
-                                        for (colIdx in 0 until activeSheet.columnCount.coerceAtLeast(1)) {
+                                        for (colIdx in firstVisibleColIndex..lastVisibleColIndex) {
                                             // Check if this cell is hidden by a merge
                                             if (SpreadsheetLayoutEngine.isCellHiddenByMerge(rowIdx, colIdx, activeSheet.mergedRegions)) {
                                                 continue
                                             }
 
                                             val mergedRegion = SpreadsheetLayoutEngine.getMergedRegionAt(rowIdx, colIdx, activeSheet.mergedRegions)
-                                            val cellWidth = if (mergedRegion != null) {
+                                            val cellWidth = (if (mergedRegion != null) {
                                                 SpreadsheetLayoutEngine.mergedWidth(mergedRegion, layout.columnWidths)
                                             } else {
                                                 layout.columnWidths.getOrElse(colIdx) { SpreadsheetLayoutEngine.DEFAULT_COLUMN_WIDTH_DP }
-                                            }
+                                            }) * scale
                                             val cellHeight = if (mergedRegion != null) {
-                                                SpreadsheetLayoutEngine.mergedHeight(mergedRegion, layout.rowHeights)
+                                                SpreadsheetLayoutEngine.mergedHeight(mergedRegion, layout.rowHeights) * scale
                                             } else {
-                                                rowHeight
+                                                scaledRowHeightDp
                                             }
+                                            
+                                            val startOffset = columnOffsets[colIdx]
+                                            val startOffsetPx = with(density) { (startOffset * scale).dp.toPx() }
 
                                             val cell = row?.cells?.get(colIdx)
                                             val isSelected = state.selectedCell?.first == rowIdx && state.selectedCell.second == colIdx
@@ -693,6 +713,7 @@ fun SpreadsheetFullscreenViewer(
 
                                             Box(
                                                 modifier = Modifier
+                                                    .offset { IntOffset((startOffsetPx - scrollX).roundToInt(), 0) }
                                                     .width(cellWidth.dp)
                                                     .height(cellHeight.dp)
                                                     .background(bgColor)
@@ -720,7 +741,7 @@ fun SpreadsheetFullscreenViewer(
                                                             Modifier.border(0.5.dp, ExcelUi.GridLine)
                                                         }
                                                     )
-                                                    .pointerInput(rowIdx, colIdx, state.isEditing) {
+                                                    .pointerInput(listOf(rowIdx, colIdx, state.isEditing)) {
                                                         detectTapGestures(
                                                             onTap = {
                                                                 onSelectCell(rowIdx, colIdx)
@@ -764,7 +785,7 @@ fun SpreadsheetFullscreenViewer(
                                                             .fillMaxSize()
                                                             .focusRequester(focusRequester),
                                                         textStyle = TextStyle(
-                                                            fontSize = (style?.fontSize ?: 11f).sp,
+                                                            fontSize = ((style?.fontSize ?: 11f) * scale).sp,
                                                             fontWeight = if (style?.fontBold == true) FontWeight.Bold else FontWeight.Normal,
                                                             fontStyle = if (style?.fontItalic == true) FontStyle.Italic else FontStyle.Normal,
                                                             color = textColor,
@@ -790,7 +811,7 @@ fun SpreadsheetFullscreenViewer(
                                                     Text(
                                                         text = displayValue,
                                                         style = TextStyle(
-                                                            fontSize = (style?.fontSize ?: 11f).sp,
+                                                            fontSize = ((style?.fontSize ?: 11f) * scale).sp,
                                                             fontWeight = if (style?.fontBold == true) FontWeight.Bold else FontWeight.Normal,
                                                             fontStyle = if (style?.fontItalic == true) FontStyle.Italic else FontStyle.Normal,
                                                             color = textColor,

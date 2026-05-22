@@ -314,6 +314,14 @@ fun FileViewerScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
 
+    DisposableEffect(Unit) {
+        val activity = context as? Activity
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        onDispose {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
     if (isExternal) {
         BackHandler {
             if (backPressedOnce) {
