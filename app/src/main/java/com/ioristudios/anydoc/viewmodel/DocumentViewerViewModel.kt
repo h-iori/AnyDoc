@@ -5,14 +5,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.ioristudios.anydoc.model.DocumentContent
-import com.ioristudios.anydoc.model.DocumentKind
-import com.ioristudios.anydoc.model.DocumentViewerState
-import com.ioristudios.anydoc.model.SearchMatch
-import com.ioristudios.anydoc.util.DocumentFileIo
-import com.ioristudios.anydoc.util.PdfTextPositionExtractor
-import com.ioristudios.anydoc.util.DocumentTypeDetector
-import com.ioristudios.anydoc.util.RecentFilesManager
+import com.ioristudios.anydoc.model.*
+import com.ioristudios.anydoc.util.*
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -109,8 +103,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     )
                     DocumentKind.Csv -> DocumentContent.CsvContent(DocumentFileIo.readCsv(request.path))
                     DocumentKind.Word -> when (request.extension) {
-                        "docx" -> DocumentContent.OfficeTextContent(DocumentFileIo.readDocxText(request.path))
-                        else -> DocumentContent.UnsupportedContent("${request.extension.uppercase()} can be viewed only through extracted metadata in this version.")
+                        "docx" -> DocxParser.parseDocx(request.path)
+                        "doc" -> DocxParser.parseDoc(request.path)
+                        "rtf" -> DocxParser.parseRtf(request.path)
+                        else -> DocumentContent.UnsupportedContent("Unsupported Word format.")
                     }
                     DocumentKind.Spreadsheet -> when (request.extension) {
                         "xlsx" -> DocumentContent.CsvContent(DocumentFileIo.readXlsxRows(request.path))
@@ -305,9 +301,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             result.onSuccess {
                 val savedContent = when (current.request.extension) {
                     "csv", "xlsx" -> DocumentContent.CsvContent(current.editedRows)
-                    "docx" -> DocumentContent.OfficeTextContent(
-                        current.editedText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
-                    )
+                    "docx" -> DocxParser.parseDocx(localPath)
                     else -> DocumentContent.TextContent(
                         text = current.editedText,
                         isCodeLike = (current.content as? DocumentContent.TextContent)?.isCodeLike == true
@@ -401,6 +395,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         is DocumentContent.TextContent -> content.text
         is DocumentContent.OfficeTextContent -> content.sections.joinToString("\n\n")
         is DocumentContent.CsvContent -> DocumentFileIo.flattenRows(content.rows)
+        is DocumentContent.WordDocumentContent -> content.plainText
         else -> ""
     }
 
@@ -431,6 +426,31 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             is DocumentContent.CsvContent -> {
                 val text = DocumentFileIo.flattenRows(if (state.isEditing) state.editedRows else content.rows)
                 findMatches(text, query, pageIndex = 0)
+            }
+            is DocumentContent.WordDocumentContent -> {
+                if (state.isEditing) {
+                    findMatches(state.editedText, query, pageIndex = 0)
+                } else {
+                    val pages = DocxParser.paginateElements(content.elements)
+                    val matches = mutableListOf<SearchMatch>()
+                    pages.forEachIndexed { pageIdx, pageElements ->
+                        val pageText = DocxParser.buildPlainText(pageElements)
+                        var start = 0
+                        while (true) {
+                            val index = pageText.indexOf(query, startIndex = start, ignoreCase = true)
+                            if (index < 0) break
+                            val previewStart = (index - 36).coerceAtLeast(0)
+                            val previewEnd = (index + query.length + 36).coerceAtMost(pageText.length)
+                            matches += SearchMatch(
+                                index = index,
+                                preview = pageText.substring(previewStart, previewEnd).replace('\n', ' '),
+                                pageIndex = pageIdx
+                            )
+                            start = index + query.length
+                        }
+                    }
+                    matches
+                }
             }
             is DocumentContent.UnsupportedContent -> findMatches(content.message, query, pageIndex = 0)
         }

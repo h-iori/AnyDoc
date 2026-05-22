@@ -97,6 +97,10 @@ dependencies {
     // File detection.
     implementation("org.apache.tika:tika-core:2.9.2")
 
+    // Legacy .doc Word document parsing (HWPF)
+    implementation("org.apache.poi:poi:5.2.5")
+    implementation("org.apache.poi:poi-scratchpad:5.2.5")
+
     // DOCX/XLSX basic editing is implemented with a small OpenXML ZIP engine in
     // DocumentFileIo. Apache POI is intentionally not bundled here because the
     // Android build would carry a large unused JVM dependency surface.
