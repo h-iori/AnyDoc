@@ -118,11 +118,17 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     }
                     DocumentKind.Unsupported -> DocumentContent.UnsupportedContent("This file type is not supported by AnyDoc yet.")
                 }
+                val wordLayoutPages = if (content is DocumentContent.WordDocumentContent) {
+                    MeasurementLayoutEngine().layoutDocument(content.elements, LayoutConfig())
+                } else {
+                    emptyList()
+                }
                 DocumentViewerState.Ready(
                     request = request,
                     content = content,
                     editedText = initialEditableText(content),
-                    editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty()
+                    editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
+                    wordLayoutPages = wordLayoutPages
                 )
             }.onSuccess { ready ->
                 _uiState.value = ready
@@ -307,11 +313,18 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         isCodeLike = (current.content as? DocumentContent.TextContent)?.isCodeLike == true
                     )
                 }
+                val savedLayoutPages = if (savedContent is DocumentContent.WordDocumentContent) {
+                    RenderCache.clear()
+                    MeasurementLayoutEngine().layoutDocument(savedContent.elements, LayoutConfig())
+                } else {
+                    emptyList()
+                }
                 _uiState.value = current.copy(
                     content = savedContent,
                     isSaving = false,
                     isEditing = false,
-                    message = "Saved changes."
+                    message = "Saved changes.",
+                    wordLayoutPages = savedLayoutPages
                 )
             }.onFailure { error ->
                 _uiState.value = current.copy(
@@ -431,10 +444,9 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 if (state.isEditing) {
                     findMatches(state.editedText, query, pageIndex = 0)
                 } else {
-                    val pages = DocxParser.paginateElements(content.elements)
                     val matches = mutableListOf<SearchMatch>()
-                    pages.forEachIndexed { pageIdx, pageElements ->
-                        val pageText = DocxParser.buildPlainText(pageElements)
+                    state.wordLayoutPages.forEachIndexed { pageIdx, page ->
+                        val pageText = extractPageText(page)
                         var start = 0
                         while (true) {
                             val index = pageText.indexOf(query, startIndex = start, ignoreCase = true)
@@ -506,5 +518,29 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             }
         }
         return null
+    }
+
+    private fun extractTextFromElement(element: PositionedElement): String {
+        return when (element) {
+            is PositionedElement.Paragraph -> {
+                element.para.spans.joinToString("") { it.text } + "\n"
+            }
+            is PositionedElement.Table -> {
+                val sb = java.lang.StringBuilder()
+                element.cellElements.forEach { row ->
+                    row.forEach { cell ->
+                        cell.forEach { subEl ->
+                            sb.append(extractTextFromElement(subEl))
+                        }
+                    }
+                }
+                sb.toString()
+            }
+            is PositionedElement.Image -> ""
+        }
+    }
+
+    private fun extractPageText(page: LayoutPage): String {
+        return page.elements.joinToString("") { extractTextFromElement(it) }
     }
 }

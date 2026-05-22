@@ -1571,9 +1571,7 @@ private fun WordFullscreenViewer(
     }
 
     // Paginate elements
-    val pages = remember(content.elements) {
-        DocxParser.paginateElements(content.elements)
-    }
+    val pages = state.wordLayoutPages
     val totalPages = pages.size.coerceAtLeast(1)
 
     // Auto-scroll to page with active match
@@ -1870,15 +1868,24 @@ private fun WordFullscreenViewer(
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    itemsIndexed(pages) { index, pageElements ->
+                    itemsIndexed(pages) { index, page ->
+                        val matchesBeforePage = remember(pages, state.searchQuery, index) {
+                            if (state.searchQuery.isBlank()) 0 else {
+                                var count = 0
+                                for (i in 0 until index) {
+                                    count += countMatchesInPage(pages[i], state.searchQuery)
+                                }
+                                count
+                            }
+                        }
                         WordPageItem(
                             filePath = state.request.path,
-                            allElements = content.elements,
-                            pageElements = pageElements,
+                            page = page,
                             pageNumber = index + 1,
                             totalPages = totalPages,
                             searchQuery = if (isSearching) state.searchQuery else "",
-                            activeMatchIndex = state.activeMatch
+                            activeMatchIndex = state.activeMatch,
+                            matchesBeforePage = matchesBeforePage
                         )
                     }
                     item { Spacer(modifier = Modifier.size(80.dp)) }
@@ -2169,7 +2176,9 @@ private fun WordFullscreenViewer(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 16.dp)
         )
     }
 }
@@ -2203,13 +2212,39 @@ private fun WordFloatingEditButton(
 @Composable
 private fun WordPageItem(
     filePath: String,
-    allElements: List<DocxElement>,
-    pageElements: List<DocxElement>,
+    page: LayoutPage,
     pageNumber: Int,
     totalPages: Int,
     searchQuery: String,
-    activeMatchIndex: Int
+    activeMatchIndex: Int,
+    matchesBeforePage: Int
 ) {
+    val cacheKey = "$filePath:$pageNumber:$searchQuery:$activeMatchIndex"
+    var bitmap by remember(cacheKey) { mutableStateOf<Bitmap?>(com.ioristudios.anydoc.util.RenderCache.get(cacheKey)) }
+    var error by remember(cacheKey) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(cacheKey) {
+        if (bitmap != null) return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                com.ioristudios.anydoc.util.PageRenderer.render(
+                    page = page,
+                    filePath = filePath,
+                    searchQuery = searchQuery,
+                    activeMatchIndex = activeMatchIndex,
+                    matchesBeforePage = matchesBeforePage
+                )
+            }
+        }
+        result.onSuccess { bmp ->
+            com.ioristudios.anydoc.util.RenderCache.put(cacheKey, bmp)
+            bitmap = bmp
+        }
+        result.onFailure { err ->
+            error = err.localizedMessage ?: "Render error"
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2223,23 +2258,33 @@ private fun WordPageItem(
         colors = CardDefaults.cardColors(containerColor = WordUi.WordPageWhite)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        start = WordUi.PageHorizontalMargin,
-                        end = WordUi.PageHorizontalMargin,
-                        top = WordUi.PageVerticalMargin,
-                        bottom = WordUi.PageVerticalMargin
-                    )
-            ) {
-                pageElements.forEach { element ->
-                    RenderDocxElement(
-                        filePath = filePath,
-                        allElements = allElements,
-                        element = element,
-                        searchQuery = searchQuery,
-                        activeMatchIndex = activeMatchIndex
+            when {
+                error != null -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = error ?: "Unknown render error",
+                            color = Color.Red,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                bitmap == null -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = WordUi.WordBlue, modifier = Modifier.size(36.dp))
+                    }
+                }
+                else -> {
+                    Image(
+                        bitmap = bitmap!!.asImageBitmap(),
+                        contentDescription = "Page $pageNumber",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.FillWidth
                     )
                 }
             }
@@ -2254,207 +2299,39 @@ private fun WordPageItem(
         }
     }
 }
-@Composable
-private fun RenderDocxElement(
-    filePath: String,
-    allElements: List<DocxElement>,
-    element: DocxElement,
-    searchQuery: String,
-    activeMatchIndex: Int
-) {
-    when (element) {
-        is DocxElement.Paragraph -> {
-            val matchesBefore = getMatchesBeforeElement(allElements, element, searchQuery)
-            val annotatedString = remember(element.para, searchQuery, activeMatchIndex, matchesBefore) {
-                buildFormattedHighlightedString(element.para, searchQuery, activeMatchIndex, matchesBefore)
-            }
 
-            val textStyle = when (element.para.style) {
-                DocxParagraphStyle.Heading1 -> MaterialTheme.typography.headlineLarge.copy(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold, color = WordUi.WordTextBlack)
-                DocxParagraphStyle.Heading2 -> MaterialTheme.typography.headlineMedium.copy(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold, color = WordUi.WordTextBlack)
-                DocxParagraphStyle.Heading3 -> MaterialTheme.typography.titleLarge.copy(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = WordUi.WordTextBlack)
-                DocxParagraphStyle.Heading4 -> MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold, color = WordUi.WordTextBlack)
-                DocxParagraphStyle.ListItem -> MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp, color = WordUi.WordTextBlack)
-                DocxParagraphStyle.Body -> MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp, color = WordUi.WordTextBlack)
+private fun countMatchesInElement(element: PositionedElement, query: String): Int {
+    if (query.isBlank()) return 0
+    return when (element) {
+        is PositionedElement.Paragraph -> {
+            var count = 0
+            var start = 0
+            val text = element.para.spans.joinToString("") { it.text }
+            while (true) {
+                val i = text.indexOf(query, start, ignoreCase = true)
+                if (i < 0) break
+                count++
+                start = i + query.length
             }
-
-            val textAlign = when (element.para.alignment) {
-                DocxTextAlignment.Center -> TextAlign.Center
-                DocxTextAlignment.End -> TextAlign.End
-                DocxTextAlignment.Justify -> TextAlign.Justify
-                DocxTextAlignment.Start -> TextAlign.Start
-            }
-            val bottomPadding = twipsToDp(element.para.spacingAfterTwips).coerceIn(4.dp, 18.dp)
-            val topPadding = twipsToDp(element.para.spacingBeforeTwips).coerceIn(0.dp, 18.dp)
-            val listIndent = (18 + element.para.listLevel * 18).dp + twipsToDp(element.para.indentStartTwips / 2)
-
-            if (annotatedString.isNotEmpty()) {
-                SelectionContainer {
-                    if (element.para.style == DocxParagraphStyle.ListItem) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = listIndent, top = topPadding, bottom = bottomPadding)
-                        ) {
-                            Text(if (element.para.isNumbered) "1. " else "\u2022 ", style = textStyle, color = WordUi.WordTextBlack, modifier = Modifier.width(24.dp))
-                            Text(text = annotatedString, style = textStyle, textAlign = textAlign, modifier = Modifier.weight(1f))
-                        }
-                    } else {
-                        Text(
-                            text = annotatedString,
-                            style = textStyle,
-                            textAlign = textAlign,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(
-                                    start = twipsToDp(element.para.indentStartTwips).coerceIn(0.dp, 64.dp),
-                                    top = topPadding,
-                                    bottom = bottomPadding
-                                )
-                        )
+            count
+        }
+        is PositionedElement.Table -> {
+            var sum = 0
+            element.cellElements.forEach { row ->
+                row.forEach { cell ->
+                    cell.forEach { subEl ->
+                        sum += countMatchesInElement(subEl, query)
                     }
                 }
             }
+            sum
         }
-        is DocxElement.Table -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .border(0.8.dp, WordUi.WordBorderGray)
-                    .padding(0.dp)
-            ) {
-                element.table.rows.forEachIndexed { rowIndex, row ->
-                    Row(modifier = Modifier.background(WordUi.WordPageWhite)) {
-                        row.cells.forEachIndexed { _, cell ->
-                            Box(
-                                modifier = Modifier
-                                    .border(0.5.dp, WordUi.WordBorderGray)
-                                    .background(if (rowIndex == 0) Color(0xFFFAFAFA) else WordUi.WordPageWhite)
-                                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                                    .widthIn(
-                                        min = cell.widthTwips?.let { twipsToDp(it).coerceIn(72.dp, 220.dp) } ?: 92.dp,
-                                        max = 240.dp
-                                    )
-                            ) {
-                                Column {
-                                    cell.elements.forEach { el ->
-                                        RenderDocxElement(
-                                            filePath = filePath,
-                                            allElements = allElements,
-                                            element = el,
-                                            searchQuery = searchQuery,
-                                            activeMatchIndex = activeMatchIndex
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.size(12.dp))
-        }
-        is DocxElement.Image -> {
-            val bitmap = rememberDocxImage(filePath, element.img)
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = "Inline Image",
-                    modifier = Modifier
-                        .fillMaxWidth(0.96f)
-                        .padding(vertical = 8.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .border(0.5.dp, WordUi.WordBorderGray, RoundedCornerShape(4.dp)),
-                    contentScale = ContentScale.Fit
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp)
-                        .background(WordUi.WordCanvasGray),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = WordUi.WordSecondaryText)
-                }
-            }
-        }
+        is PositionedElement.Image -> 0
     }
 }
 
-@Composable
-private fun rememberDocxImage(path: String, image: DocxImage): ImageBitmap? {
-    var bitmap by remember(path, image.entryName) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(path, image.entryName) {
-        withContext(Dispatchers.IO) {
-            runCatching {
-                if (image.bytes != null) {
-                    val bmp = BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size)
-                    bitmap = bmp?.asImageBitmap()
-                } else {
-                    ZipFile(path).use { zip ->
-                        val entry = zip.getEntry(image.entryName)
-                        if (entry != null) {
-                            zip.getInputStream(entry).use { stream ->
-                                val bytes = stream.readBytes()
-                                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                bitmap = bmp?.asImageBitmap()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return bitmap
-}
-
-private fun buildFormattedHighlightedString(
-    para: DocxParagraph,
-    query: String,
-    activeIndex: Int,
-    matchesBeforeParagraph: Int
-): AnnotatedString {
-    val fullText = para.spans.joinToString("") { it.text }
-    return buildAnnotatedString {
-        var currentOffset = 0
-        para.spans.forEach { span ->
-            val start = currentOffset
-            val end = currentOffset + span.text.length
-            append(span.text)
-
-            val spanStyle = SpanStyle(
-                fontWeight = if (span.bold) FontWeight.Bold else FontWeight.Normal,
-                fontStyle = if (span.italic) FontStyle.Italic else FontStyle.Normal,
-                textDecoration = if (span.underline) TextDecoration.Underline else TextDecoration.None,
-                fontSize = (span.fontSize ?: 14f).sp,
-                color = span.color?.let {
-                    runCatching { Color(android.graphics.Color.parseColor("#$it")) }.getOrNull()
-                } ?: WordUi.WordTextBlack
-            )
-            addStyle(spanStyle, start, end)
-            currentOffset = end
-        }
-
-        if (query.isNotEmpty()) {
-            var cursor = 0
-            var localMatchIdx = 0
-            while (cursor <= fullText.length) {
-                val found = fullText.indexOf(query, cursor, ignoreCase = true)
-                if (found == -1) break
-                val globalMatchIdx = matchesBeforeParagraph + localMatchIdx
-                val bg = if (globalMatchIdx == activeIndex) HighlightActive else HighlightNormal
-                addStyle(
-                    SpanStyle(background = bg, color = Color.Black),
-                    found,
-                    found + query.length
-                )
-                cursor = found + query.length
-                localMatchIdx++
-            }
-        }
-    }
+private fun countMatchesInPage(page: LayoutPage, query: String): Int {
+    return page.elements.sumOf { countMatchesInElement(it, query) }
 }
 
 private fun twipsToDp(twips: Int): Dp = (twips / 20f).dp

@@ -135,7 +135,8 @@ sealed class DocumentViewerState {
         val searchMatches: List<SearchMatch> = emptyList(),
         val activeMatch: Int = -1,
         val message: String? = null,
-        val isSaving: Boolean = false
+        val isSaving: Boolean = false,
+        val wordLayoutPages: List<com.ioristudios.anydoc.model.LayoutPage> = emptyList()
     ) : DocumentViewerState()
 
     data class Error(
