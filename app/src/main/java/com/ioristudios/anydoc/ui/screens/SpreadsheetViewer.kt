@@ -279,11 +279,8 @@ fun SpreadsheetFullscreenViewer(
                 // 4. Scroll horizontally to the colIndex
                 flingJobX?.cancel()
                 coroutineScope.launch {
-                    var targetLeftPx = 0f
-                    for (i in 0 until match.colIndex) {
-                        val colWidth = layout.columnWidths.getOrNull(i) ?: SpreadsheetLayoutEngine.DEFAULT_COLUMN_WIDTH_DP
-                        targetLeftPx += with(density) { (colWidth * scale).dp.toPx() }
-                    }
+                    val targetLeftDp = columnOffsets.getOrNull(match.colIndex) ?: 0f
+                    val targetLeftPx = with(density) { (targetLeftDp * scale).dp.toPx() }
                     
                     val cellViewportWidth = (containerWidthPx - rowHeaderWidthPx).coerceAtLeast(0f)
                     val colWidth = layout.columnWidths.getOrNull(match.colIndex) ?: SpreadsheetLayoutEngine.DEFAULT_COLUMN_WIDTH_DP
@@ -292,9 +289,24 @@ fun SpreadsheetFullscreenViewer(
                     val targetScrollX = (targetLeftPx - cellViewportWidth / 2f + colWidthPx / 2f)
                         .coerceIn(0f, (totalColumnWidthPx - cellViewportWidth).coerceAtLeast(0f))
                     
+                    val distance = kotlin.math.abs(targetScrollX - scrollX)
+                    val maxDistanceToAnimate = cellViewportWidth * 1.5f
+                    
+                    if (distance > maxDistanceToAnimate) {
+                        // Snap closer first to avoid instantiating thousands of cells during animation
+                        val snapTo = if (targetScrollX > scrollX) {
+                            targetScrollX - maxDistanceToAnimate
+                        } else {
+                            targetScrollX + maxDistanceToAnimate
+                        }
+                        scrollX = snapTo
+                    }
+                    
                     Animatable(scrollX).animateTo(
                         targetValue = targetScrollX,
-                        animationSpec = tween(500)
+                        animationSpec = androidx.compose.animation.core.spring(
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                        )
                     ) {
                         scrollX = this.value
                     }
