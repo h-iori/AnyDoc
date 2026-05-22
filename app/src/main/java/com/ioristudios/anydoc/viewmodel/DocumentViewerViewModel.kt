@@ -110,6 +110,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         text = DocumentFileIo.readText(request.path),
                         isCodeLike = request.extension != "txt" && request.extension != "log"
                     )
+                    DocumentKind.Markdown -> DocumentContent.TextContent(
+                        text = DocumentFileIo.readText(request.path),
+                        isCodeLike = false
+                    )
                     DocumentKind.Csv -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(request.path))
                     DocumentKind.Word -> when (request.extension) {
                         "docx" -> DocxParser.parseDocx(request.path)

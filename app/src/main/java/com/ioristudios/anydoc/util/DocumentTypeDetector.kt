@@ -7,7 +7,7 @@ import java.io.File
 
 object DocumentTypeDetector {
     private val editableTextExtensions = setOf(
-        "txt", "md", "xml", "log", "html", "htm", "py", "kt", "java", "json",
+        "txt", "xml", "log", "html", "htm", "py", "kt", "java", "json",
         "cpp", "c", "h", "js", "css", "ts", "tsx", "jsx", "cs", "go",
         "rs", "swift", "php", "rb", "scala", "yaml", "yml", "toml", "ini",
         "gradle", "sql", "sh", "bat", "ps1", "r", "lua", "dart", "vue",
@@ -24,12 +24,14 @@ object DocumentTypeDetector {
             "doc", "docx", "rtf" -> DocumentKind.Word
             "xls", "xlsx" -> DocumentKind.Spreadsheet
             "csv" -> DocumentKind.Csv
+            "md" -> DocumentKind.Markdown
             in editableTextExtensions -> DocumentKind.Text
             else -> DocumentKind.Unsupported
         }
         val canEdit = when (extension) {
             "pdf", "ppt", "pptx", "doc", "rtf" -> false
             "docx", "xlsx", "xls", "csv" -> true
+            "md" -> true
             in editableTextExtensions -> true
             else -> false
         }

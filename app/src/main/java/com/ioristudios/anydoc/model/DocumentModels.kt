@@ -9,6 +9,7 @@ enum class DocumentKind {
     Spreadsheet,
     Csv,
     Text,
+    Markdown,
     Unsupported
 }
 
