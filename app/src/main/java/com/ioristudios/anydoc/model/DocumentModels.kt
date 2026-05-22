@@ -56,6 +56,10 @@ sealed class DocumentContent {
         val styles: List<SpreadsheetStyle> = emptyList(),
         val activeSheetIndex: Int = 0
     ) : DocumentContent()
+    data class PresentationFileContent(
+        val path: String,
+        val extension: String
+    ) : DocumentContent()
     data class UnsupportedContent(val message: String) : DocumentContent()
 }
 
@@ -205,7 +209,8 @@ sealed class DocumentViewerState {
         val activeSheetIndex: Int = 0,
         val editedCells: Map<String, String> = emptyMap(),  // "sheetIdx:row:col" → value
         val selectedCell: Pair<Int, Int>? = null,            // row, col
-        val formulaBarText: String = ""
+        val formulaBarText: String = "",
+        val presentationState: PresentationUiState = PresentationUiState()
     ) : DocumentViewerState()
 
     data class Error(

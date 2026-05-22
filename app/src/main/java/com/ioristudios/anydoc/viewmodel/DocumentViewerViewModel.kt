@@ -18,6 +18,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private val context = application
     private val _uiState = MutableStateFlow<DocumentViewerState>(DocumentViewerState.Loading)
     private var pdfPageDataList: List<PdfTextPositionExtractor.Companion.PageTextData> = emptyList()
+    private var slideshowJob: kotlinx.coroutines.Job? = null
     val uiState: StateFlow<DocumentViewerState> = _uiState.asStateFlow()
 
     init {
@@ -27,10 +28,17 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             val initMethod = loaderClass.getMethod("init", android.content.Context::class.java)
             initMethod.invoke(null, application.applicationContext)
         }
+        // Pre-warm Apache POI XmlBeans schema type system in the background
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                org.apache.poi.xslf.usermodel.XMLSlideShow().close()
+            }
+        }
     }
 
     fun open(pathOrUri: String) {
         viewModelScope.launch(Dispatchers.IO) {
+            slideshowJob?.cancel()
             _uiState.value = DocumentViewerState.Loading
 
             var targetPath = pathOrUri
@@ -90,6 +98,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
 
             runCatching {
                 val request = DocumentTypeDetector.detect(targetPath, originalUriString)
+                var parsedPresentation: PresentationContent? = null
                 val content = when (request.kind) {
                     DocumentKind.Pdf -> {
                         val pageData = PdfTextPositionExtractor.extractPageData(targetPath)
@@ -114,8 +123,17 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                         else -> DocumentContent.UnsupportedContent("Unsupported spreadsheet format.")
                     }
                     DocumentKind.Presentation -> when (request.extension) {
-                        "pptx" -> DocumentContent.OfficeTextContent(DocumentFileIo.readPptxText(request.path))
-                        else -> DocumentContent.UnsupportedContent("Legacy PPT slide rendering is not available in this build.")
+                        "pptx", "ppt" -> {
+                            parsedPresentation = kotlinx.coroutines.withTimeout(8000L) {
+                                if (request.extension == "pptx") {
+                                    PptxParser.parsePptx(request.path)
+                                } else {
+                                    PptxParser.parsePpt(request.path)
+                                }
+                            }
+                            DocumentContent.PresentationFileContent(request.path, request.extension)
+                        }
+                        else -> DocumentContent.UnsupportedContent("Unsupported presentation format.")
                     }
                     DocumentKind.Unsupported -> DocumentContent.UnsupportedContent("This file type is not supported by AnyDoc yet.")
                 }
@@ -135,7 +153,10 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
                     wordLayoutPages = wordLayoutPages,
                     editedWordParagraphs = editedWordParasMap,
-                    activeSheetIndex = 0
+                    activeSheetIndex = 0,
+                    presentationState = PresentationUiState(
+                        parsedContent = parsedPresentation
+                    )
                 )
             }.onSuccess { ready ->
                 _uiState.value = ready
@@ -658,6 +679,59 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 }
                 matches
             }
+            is DocumentContent.PresentationFileContent -> {
+                val matches = mutableListOf<SearchMatch>()
+                val presentation = state.presentationState.parsedContent
+                presentation?.slides?.forEachIndexed { slideIdx, slide ->
+                    val slideTextBuilder = java.lang.StringBuilder()
+                    fun extractText(element: SlideElement) {
+                        when (element) {
+                            is SlideElement.TextBox -> {
+                                element.paragraphs.forEach { p ->
+                                    p.runs.forEach { r -> slideTextBuilder.append(r.text) }
+                                    slideTextBuilder.append("\n")
+                                }
+                            }
+                            is SlideElement.ShapeBox -> {
+                                element.paragraphs.forEach { p ->
+                                    p.runs.forEach { r -> slideTextBuilder.append(r.text) }
+                                    slideTextBuilder.append("\n")
+                                }
+                            }
+                            is SlideElement.GroupBox -> {
+                                element.elements.forEach { extractText(it) }
+                            }
+                            is SlideElement.TableBox -> {
+                                element.rows.forEach { row ->
+                                    row.cells.forEach { cell ->
+                                        cell.paragraphs.forEach { p ->
+                                            p.runs.forEach { r -> slideTextBuilder.append(r.text) }
+                                            slideTextBuilder.append("\n")
+                                        }
+                                    }
+                                }
+                            }
+                            is SlideElement.ImageBox -> {}
+                        }
+                    }
+                    slide.elements.forEach { extractText(it) }
+                    val slideText = slideTextBuilder.toString()
+                    var start = 0
+                    while (true) {
+                        val index = slideText.indexOf(query, startIndex = start, ignoreCase = true)
+                        if (index < 0) break
+                        val previewStart = (index - 36).coerceAtLeast(0)
+                        val previewEnd = (index + query.length + 36).coerceAtMost(slideText.length)
+                        matches += SearchMatch(
+                            index = index,
+                            preview = "[Slide ${slideIdx + 1}] " + slideText.substring(previewStart, previewEnd).replace('\n', ' '),
+                            pageIndex = slideIdx
+                        )
+                        start = index + query.length
+                    }
+                }
+                matches
+            }
             is DocumentContent.UnsupportedContent -> findMatches(content.message, query, pageIndex = 0)
         }
     }
@@ -802,5 +876,98 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             listOf(DocxSpan(text = newText))
         }
         return para.copy(spans = newSpans)
+    }
+
+    // ─── Presentation Helper Methods ─────────────────────────────────────────
+
+    fun goToSlide(index: Int) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val presentation = current.presentationState.parsedContent ?: return
+        if (index in 0 until presentation.slides.size) {
+            _uiState.value = current.copy(
+                presentationState = current.presentationState.copy(
+                    currentSlide = index
+                )
+            )
+        }
+    }
+
+    fun nextSlide() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val presentation = current.presentationState.parsedContent ?: return
+        val nextIndex = current.presentationState.currentSlide + 1
+        if (nextIndex < presentation.slides.size) {
+            goToSlide(nextIndex)
+        } else {
+            if (current.presentationState.isSlideshowActive) {
+                goToSlide(0)
+            }
+        }
+    }
+
+    fun previousSlide() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val prevIndex = current.presentationState.currentSlide - 1
+        if (prevIndex >= 0) {
+            goToSlide(prevIndex)
+        }
+    }
+
+    fun startSlideshow() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val presentation = current.presentationState.parsedContent ?: return
+        if (presentation.slides.isEmpty()) return
+
+        slideshowJob?.cancel()
+        _uiState.value = current.copy(
+            presentationState = current.presentationState.copy(
+                isSlideshowActive = true,
+                isFullscreen = true
+            )
+        )
+
+        slideshowJob = viewModelScope.launch(Dispatchers.Default) {
+            while (true) {
+                val state = _uiState.value as? DocumentViewerState.Ready ?: break
+                if (!state.presentationState.isSlideshowActive) break
+                
+                kotlinx.coroutines.delay(state.presentationState.slideshowIntervalMs)
+                
+                val latestState = _uiState.value as? DocumentViewerState.Ready ?: break
+                val totalSlides = latestState.presentationState.parsedContent?.slides?.size ?: 0
+                val currentIdx = latestState.presentationState.currentSlide
+                
+                if (totalSlides > 0) {
+                    val nextIdx = (currentIdx + 1) % totalSlides
+                    launch(Dispatchers.Main) {
+                        goToSlide(nextIdx)
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopSlideshow() {
+        slideshowJob?.cancel()
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        _uiState.value = current.copy(
+            presentationState = current.presentationState.copy(
+                isSlideshowActive = false
+            )
+        )
+    }
+
+    fun toggleFullscreen() {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        _uiState.value = current.copy(
+            presentationState = current.presentationState.copy(
+                isFullscreen = !current.presentationState.isFullscreen
+            )
+        )
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        slideshowJob?.cancel()
     }
 }

@@ -382,10 +382,11 @@ fun FileViewerScreen(
         )
     }
 
-    // Check if we should use fullscreen PDF or Word mode
+    // Check if we should use fullscreen PDF, Word, or Presentation mode
     val ready = state as? DocumentViewerState.Ready
     val isPdf = ready?.content is DocumentContent.PdfContent
     val isWord = ready?.content is DocumentContent.WordDocumentContent
+    val isPresentation = ready?.content is DocumentContent.PresentationFileContent
 
     if (isPdf && ready != null) {
         // ─── Fullscreen PDF viewer ──────────────────────────────────────────
@@ -467,6 +468,47 @@ fun FileViewerScreen(
             onParagraphTextChange = { index, text ->
                 viewModel.updateWordParagraphText(index, text)
             },
+            snackbarHostState = snackbarHostState
+        )
+    } else if (isPresentation && ready != null) {
+        // ─── Fullscreen Presentation viewer ─────────────────────────────────
+        PresentationFullscreenViewer(
+            state = ready,
+            isSearching = isSearching,
+            onBack = {
+                if (isExternal) {
+                    if (backPressedOnce) {
+                        (context as? Activity)?.finishAndRemoveTask()
+                    } else {
+                        backPressedOnce = true
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("Double tap on back to exit", duration = SnackbarDuration.Short)
+                            delay(2000)
+                            backPressedOnce = false
+                        }
+                    }
+                } else {
+                    onBack()
+                }
+            },
+            onTitleDoubleTap = {
+                renameInput = ready.request.displayName.substringBeforeLast(".")
+                showRenameDialog = true
+            },
+            onSearchOpen = { isSearching = true },
+            onSearchClose = {
+                viewModel.updateSearch("")
+                isSearching = false
+            },
+            onSearchQueryChange = viewModel::updateSearch,
+            onNextMatch = viewModel::nextMatch,
+            onPrevMatch = viewModel::prevMatch,
+            onGoToSlide = viewModel::goToSlide,
+            onNextSlide = viewModel::nextSlide,
+            onPrevSlide = viewModel::previousSlide,
+            onStartSlideshow = viewModel::startSlideshow,
+            onStopSlideshow = viewModel::stopSlideshow,
+            onToggleFullscreen = viewModel::toggleFullscreen,
             snackbarHostState = snackbarHostState
         )
     } else if (ready != null && ready.content is DocumentContent.SpreadsheetContent) {

@@ -1,5 +1,6 @@
 import java.util.Properties
 
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -88,6 +89,7 @@ android {
             excludes += "META-INF/LICENSE*"
             excludes += "META-INF/NOTICE*"
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            merges += "META-INF/services/**"
         }
         jniLibs {
             keepDebugSymbols += "**/libdatastore_shared_counter.so"
@@ -135,6 +137,14 @@ dependencies {
     // Legacy .doc Word document parsing (HWPF)
     implementation("org.apache.poi:poi:5.2.5")
     implementation("org.apache.poi:poi-scratchpad:5.2.5")
+    // PPTX slide rendering — Apache POI XSLF
+    implementation("org.apache.poi:poi-ooxml:5.2.5")
+    // XMLBeans schema type system support for POI OOXML
+    implementation("org.apache.xmlbeans:xmlbeans:5.2.0")
+    // Log4j API facade for POI logging
+    implementation("org.apache.logging.log4j:log4j-api:2.21.1")
+    // AWT compatibility stubs for Android to support Apache POI
+    implementation("ro.andob.androidawt:androidawt:1.0.4")
 
     // DOCX/XLSX basic editing is implemented with a small OpenXML ZIP engine in
     // DocumentFileIo. Apache POI is intentionally not bundled here because the
@@ -154,3 +164,4 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
+
