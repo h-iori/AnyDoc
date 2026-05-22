@@ -231,9 +231,6 @@ private val pdfPageBitmapCache: LruCache<String, PdfPageFrame> by lazy {
     object : LruCache<String, PdfPageFrame>(cacheSize) {
         override fun sizeOf(key: String, value: PdfPageFrame): Int =
             value.bitmap.byteCount / 1024
-        override fun entryRemoved(evicted: Boolean, key: String, oldValue: PdfPageFrame, newValue: PdfPageFrame?) {
-            if (evicted) oldValue.bitmap.recycle()
-        }
     }
 }
 

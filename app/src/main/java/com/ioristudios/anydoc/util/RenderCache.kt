@@ -10,12 +10,6 @@ object RenderCache {
     private val cache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, value: Bitmap): Int =
             value.byteCount / 1024
-
-        override fun entryRemoved(evicted: Boolean, key: String, oldValue: Bitmap, newValue: Bitmap?) {
-            if (evicted) {
-                oldValue.recycle()
-            }
-        }
     }
 
     fun get(key: String): Bitmap? {
