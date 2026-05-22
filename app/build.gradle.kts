@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -6,6 +8,38 @@ plugins {
 android {
     namespace = "com.ioristudios.anydoc"
     compileSdk = 34
+
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    val keystoreProperties = Properties()
+    val hasKeystore = if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { input ->
+            keystoreProperties.load(input)
+        }
+        true
+    } else {
+        false
+    }
+
+    signingConfigs {
+        create("release") {
+            if (hasKeystore) {
+                val storeFilePath = keystoreProperties.getProperty("storeFile")
+                val storeFileObj = rootProject.file(storeFilePath)
+                if (storeFileObj.exists()) {
+                    storeFile = storeFileObj
+                    storePassword = keystoreProperties.getProperty("storePassword")
+                    keyAlias = keystoreProperties.getProperty("keyAlias")
+                    keyPassword = keystoreProperties.getProperty("keyPassword")
+                } else {
+                    logger.warn("Keystore file not found at ${storeFileObj.absolutePath}. Falling back to debug signing.")
+                    initWith(signingConfigs.getByName("debug"))
+                }
+            } else {
+                logger.warn("keystore.properties not found. Falling back to debug signing.")
+                initWith(signingConfigs.getByName("debug"))
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.ioristudios.anydoc"
@@ -26,6 +60,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

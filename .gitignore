@@ -3,3 +3,8 @@ app/build
 /build
 /.swarm
 ruvector.db
+
+# Keystore and signing credentials
+*.jks
+*.keystore
+keystore.properties
