@@ -81,6 +81,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -152,6 +153,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.TextUnit
@@ -2472,94 +2475,99 @@ private fun WordPageItem(
                         }
 
                         flatParas.forEach { flatPara ->
-                            val pWidth = (flatPara.width * scalePointsToDp.value).dp
-                            val pHeight = (flatPara.height * scalePointsToDp.value).dp
-                            val pX = (flatPara.x * scalePointsToDp.value).dp
-                            val pY = (flatPara.y * scalePointsToDp.value).dp
+                            key(flatPara.para.originalIndex) {
+                                val pWidth = (flatPara.width * scalePointsToDp.value).dp
+                                val pHeight = (flatPara.height * scalePointsToDp.value).dp
+                                val pX = (flatPara.x * scalePointsToDp.value).dp
+                                val pY = (flatPara.y * scalePointsToDp.value).dp
 
-                            val textColor = remember(flatPara.para) {
-                                val hex = flatPara.para.spans.firstOrNull()?.color
-                                if (hex != null) {
-                                    try {
-                                        val cleanHex = hex.replace("#", "")
-                                        val colorInt = android.graphics.Color.parseColor(
-                                            if (cleanHex.length == 6) "#$cleanHex" else if (cleanHex.length == 8) "#$cleanHex" else "#000000"
-                                        )
-                                        Color(colorInt)
-                                    } catch (e: Exception) {
+                                val textColor = remember(flatPara.para) {
+                                    val hex = flatPara.para.spans.firstOrNull()?.color
+                                    if (hex != null) {
+                                        try {
+                                            val cleanHex = hex.replace("#", "")
+                                            val colorInt = android.graphics.Color.parseColor(
+                                                if (cleanHex.length == 6) "#$cleanHex" else if (cleanHex.length == 8) "#$cleanHex" else "#000000"
+                                            )
+                                            Color(colorInt)
+                                        } catch (e: Exception) {
+                                            Color.Black
+                                        }
+                                    } else {
                                         Color.Black
                                     }
-                                } else {
-                                    Color.Black
                                 }
-                            }
 
-                            var isFocused by remember { mutableStateOf(false) }
-                            val textValue = remember(flatPara.para.originalIndex) {
-                                mutableStateOf(
-                                    editedWordParagraphs[flatPara.para.originalIndex]
+                                var isFocused by remember { mutableStateOf(false) }
+                                var textFieldValue by remember {
+                                    val initialText = editedWordParagraphs[flatPara.para.originalIndex]
                                         ?: flatPara.para.spans.joinToString("") { it.text }
-                                )
-                            }
-
-                            LaunchedEffect(editedWordParagraphs[flatPara.para.originalIndex]) {
-                                val latest = editedWordParagraphs[flatPara.para.originalIndex]
-                                    ?: flatPara.para.spans.joinToString("") { it.text }
-                                if (latest != textValue.value) {
-                                    textValue.value = latest
+                                    mutableStateOf(TextFieldValue(initialText))
                                 }
-                            }
 
-                            val firstSpan = flatPara.para.spans.firstOrNull()
-                            val fontSizeSp = ((firstSpan?.fontSize ?: 12f) * scalePointsToDp.value).sp
-                            val fontWeight = if (firstSpan?.bold == true) FontWeight.Bold else FontWeight.Normal
-                            val fontStyle = if (firstSpan?.italic == true) FontStyle.Italic else FontStyle.Normal
-                            val textDecoration = if (firstSpan?.underline == true) TextDecoration.Underline else TextDecoration.None
-                            val align = when (flatPara.para.alignment) {
-                                DocxTextAlignment.Start -> TextAlign.Start
-                                DocxTextAlignment.Center -> TextAlign.Center
-                                DocxTextAlignment.End -> TextAlign.End
-                                DocxTextAlignment.Justify -> TextAlign.Justify
-                            }
-                            val lineSpacingSp = flatPara.para.lineSpacingTwips?.let {
-                                ((it / 20f) * scalePointsToDp.value).sp
-                            }
+                                val externalText = editedWordParagraphs[flatPara.para.originalIndex]
+                                    ?: flatPara.para.spans.joinToString("") { it.text }
 
-                            BasicTextField(
-                                value = textValue.value,
-                                onValueChange = { newText ->
-                                    textValue.value = newText
-                                    onParagraphTextChange(flatPara.para.originalIndex, newText)
-                                },
-                                modifier = Modifier
-                                    .offset(x = pX, y = pY)
-                                    .width(pWidth)
-                                    .heightIn(min = pHeight)
-                                    .onFocusChanged { isFocused = it.isFocused }
-                                    .background(
-                                        color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.05f) else Color.Transparent,
-                                        shape = RoundedCornerShape(2.dp)
+                                LaunchedEffect(externalText) {
+                                    if (textFieldValue.text != externalText) {
+                                        textFieldValue = textFieldValue.copy(
+                                            text = externalText,
+                                            selection = TextRange(externalText.length)
+                                        )
+                                    }
+                                }
+
+                                val firstSpan = flatPara.para.spans.firstOrNull()
+                                val fontSizeSp = ((firstSpan?.fontSize ?: 12f) * scalePointsToDp.value).sp
+                                val fontWeight = if (firstSpan?.bold == true) FontWeight.Bold else FontWeight.Normal
+                                val fontStyle = if (firstSpan?.italic == true) FontStyle.Italic else FontStyle.Normal
+                                val textDecoration = if (firstSpan?.underline == true) TextDecoration.Underline else TextDecoration.None
+                                val align = when (flatPara.para.alignment) {
+                                    DocxTextAlignment.Start -> TextAlign.Start
+                                    DocxTextAlignment.Center -> TextAlign.Center
+                                    DocxTextAlignment.End -> TextAlign.End
+                                    DocxTextAlignment.Justify -> TextAlign.Justify
+                                }
+                                val lineSpacingSp = flatPara.para.lineSpacingTwips?.let {
+                                    ((it / 20f) * scalePointsToDp.value).sp
+                                }
+
+                                BasicTextField(
+                                    value = textFieldValue,
+                                    onValueChange = { newValue ->
+                                        textFieldValue = newValue
+                                        onParagraphTextChange(flatPara.para.originalIndex, newValue.text)
+                                    },
+                                    modifier = Modifier
+                                        .offset(x = pX, y = pY)
+                                        .width(pWidth)
+                                        .heightIn(min = pHeight)
+                                        .onFocusChanged { isFocused = it.isFocused }
+                                        .background(
+                                            color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.05f) else Color.Transparent,
+                                            shape = RoundedCornerShape(2.dp)
+                                        )
+                                        .border(
+                                            width = 0.5.dp,
+                                            color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.4f) else Color.Transparent,
+                                            shape = RoundedCornerShape(2.dp)
+                                        )
+                                        .padding(horizontal = 2.dp),
+                                    textStyle = TextStyle(
+                                        fontSize = fontSizeSp,
+                                        fontWeight = fontWeight,
+                                        fontStyle = fontStyle,
+                                        textDecoration = textDecoration,
+                                        textAlign = align,
+                                        color = textColor,
+                                        lineHeight = lineSpacingSp ?: TextUnit.Unspecified
+                                    ),
+                                    cursorBrush = SolidColor(AppColors.BrandStrong),
+                                    keyboardOptions = KeyboardOptions(
+                                        capitalization = KeyboardCapitalization.Sentences
                                     )
-                                    .border(
-                                        width = 0.5.dp,
-                                        color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.4f) else Color.Transparent,
-                                        shape = RoundedCornerShape(2.dp)
-                                    )
-                                    .padding(horizontal = 2.dp),
-                                textStyle = TextStyle(
-                                    fontSize = fontSizeSp,
-                                    fontWeight = fontWeight,
-                                    fontStyle = fontStyle,
-                                    textDecoration = textDecoration,
-                                    textAlign = align,
-                                    color = textColor,
-                                    lineHeight = lineSpacingSp ?: TextUnit.Unspecified
-                                ),
-                                cursorBrush = SolidColor(AppColors.BrandStrong),
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Sentences
                                 )
-                            )
+                            }
                         }
                     }
                 }

@@ -63,6 +63,7 @@ fun getAccentForExtension(extension: String): Color {
         "doc", "docx", "rtf" -> NeonCyan
         "xls", "xlsx", "csv" -> NeonGreen
         "ppt", "pptx" -> NeonOrange
+        "txt" -> Color(0xFFA1A4B8)
         "js", "kt", "java", "html", "css", "json", "xml", "py", "ts", "tsx",
         "jsx", "c", "cpp", "h", "cs", "go", "rs", "swift", "php", "rb",
         "scala", "yaml", "yml", "toml", "ini", "gradle", "log", "md" -> NeonPurple

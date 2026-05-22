@@ -19,7 +19,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -34,9 +37,11 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,6 +78,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -81,6 +88,8 @@ import com.ioristudios.anydoc.model.DocumentContent
 import com.ioristudios.anydoc.model.DocumentKind
 import com.ioristudios.anydoc.model.DocumentViewerState
 import com.ioristudios.anydoc.ui.theme.AppColors
+import com.ioristudios.anydoc.ui.theme.getAccentForExtension
+import com.ioristudios.anydoc.ui.theme.neonGlow
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
@@ -440,6 +449,28 @@ fun TextDocumentFullscreenViewer(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        floatingActionButton = {
+            if (state.request.canEdit && !state.isEditing && !isSearching) {
+                FloatingActionButton(
+                    onClick = {
+                        haptics.performHapticFeedback()
+                        if (isMarkdown) {
+                            markdownPreviewMode = false
+                        }
+                        onEdit()
+                    },
+                    shape = CircleShape,
+                    containerColor = accentColor.copy(alpha = 0.15f),
+                    contentColor = accentColor,
+                    modifier = Modifier
+                        .size(58.dp)
+                        .neonGlow(color = accentColor, radius = 12.dp, shape = CircleShape)
+                        .border(1.5.dp, accentColor, CircleShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit file")
+                }
+            }
+        },
         topBar = {
             if (isSearching) {
                 // ─── Search TopBar ────────────────────────────────────────
@@ -451,7 +482,7 @@ fun TextDocumentFullscreenViewer(
                             placeholder = {
                                 Text(
                                     "Search in document…",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    color = Color.White.copy(alpha = 0.5f)
                                 )
                             },
                             singleLine = true,
@@ -459,10 +490,11 @@ fun TextDocumentFullscreenViewer(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent
+                                unfocusedBorderColor = Color.Transparent,
+                                cursorColor = Color.White
                             ),
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = Color.White
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -475,7 +507,7 @@ fun TextDocumentFullscreenViewer(
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Exit search",
-                                tint = AppColors.BrandStrong
+                                tint = Color.White
                             )
                         }
                     },
@@ -486,7 +518,7 @@ fun TextDocumentFullscreenViewer(
                             Text(
                                 text = label,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color.White.copy(alpha = 0.8f),
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             IconButton(
@@ -496,7 +528,7 @@ fun TextDocumentFullscreenViewer(
                                 Icon(
                                     Icons.Default.KeyboardArrowUp,
                                     contentDescription = "Previous match",
-                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.4f)
                                 )
                             }
                             IconButton(
@@ -506,13 +538,16 @@ fun TextDocumentFullscreenViewer(
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Next match",
-                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.White.copy(alpha = 0.4f)
                                 )
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f)
+                        containerColor = accentColor.copy(alpha = 0.95f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White
                     )
                 )
             } else {
@@ -525,12 +560,12 @@ fun TextDocumentFullscreenViewer(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = Color.White
                             )
                             Text(
                                 text = state.request.extension.uppercase(),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = accentColor
+                                color = Color.White.copy(alpha = 0.7f)
                             )
                         }
                     },
@@ -542,7 +577,7 @@ fun TextDocumentFullscreenViewer(
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = AppColors.BrandStrong
+                                tint = Color.White
                             )
                         }
                     },
@@ -559,7 +594,7 @@ fun TextDocumentFullscreenViewer(
                         Text(
                             text = "${zoomPercent}%",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color.White.copy(alpha = 0.8f),
                             modifier = Modifier.padding(horizontal = 2.dp)
                         )
                         IconButton(
@@ -579,44 +614,35 @@ fun TextDocumentFullscreenViewer(
                             Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
                         }
 
-                        // Markdown: toggle preview/edit
-                        if (isMarkdown && state.request.canEdit) {
+                        // Markdown: toggle preview (eye button)
+                        if (isMarkdown) {
                             IconButton(onClick = {
                                 haptics.performHapticFeedback()
-                                if (markdownPreviewMode) {
-                                    markdownPreviewMode = false
-                                    onEdit()
-                                } else {
-                                    markdownPreviewMode = true
-                                    onExitEdit()
-                                }
+                                markdownPreviewMode = !markdownPreviewMode
                             }) {
                                 Icon(
-                                    if (markdownPreviewMode) Icons.Default.EditNote else Icons.Default.Visibility,
-                                    contentDescription = if (markdownPreviewMode) "Edit source" else "Preview",
-                                    tint = AppColors.BrandStrong
+                                    imageVector = if (markdownPreviewMode) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (markdownPreviewMode) "View Markdown Source" else "View Rendered Markdown",
+                                    tint = Color.White
                                 )
                             }
                         }
 
-                        // Edit/Save for non-markdown
-                        if (!isMarkdown || !markdownPreviewMode) {
-                            if (state.isEditing) {
-                                IconButton(onClick = { haptics.performHapticFeedback(); onExitEdit() }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Cancel editing", tint = Color.White)
-                                }
-                                IconButton(onClick = { haptics.performHapticFeedback(); onSave() }) {
-                                    Icon(Icons.Default.Save, contentDescription = "Save", tint = AppColors.BrandStrong)
-                                }
-                            } else if (!isMarkdown && state.request.canEdit) {
-                                IconButton(onClick = { haptics.performHapticFeedback(); onEdit() }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White)
-                                }
+                        // Save and Cancel buttons in editing mode
+                        if (state.isEditing) {
+                            IconButton(onClick = { haptics.performHapticFeedback(); onExitEdit() }) {
+                                Icon(Icons.Default.Close, contentDescription = "Cancel editing", tint = Color.White)
+                            }
+                            IconButton(onClick = { haptics.performHapticFeedback(); onSave() }) {
+                                Icon(Icons.Default.Save, contentDescription = "Save", tint = Color.White)
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = AppColors.SurfaceElevated.copy(alpha = 0.98f)
+                        containerColor = accentColor.copy(alpha = 0.95f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White
                     )
                 )
             }
@@ -737,8 +763,17 @@ private fun CodeEditorSurface(
 
     if (isEditing) {
         // Editable BasicTextField
-        var textFieldValue by remember(text) {
+        var textFieldValue by remember {
             mutableStateOf(TextFieldValue(text))
+        }
+
+        LaunchedEffect(text) {
+            if (textFieldValue.text != text) {
+                textFieldValue = textFieldValue.copy(
+                    text = text,
+                    selection = TextRange(text.length)
+                )
+            }
         }
 
         BasicTextField(
