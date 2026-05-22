@@ -118,6 +118,8 @@ import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 // ─── Excel-themed color palette ─────────────────────────────────────────────
 
@@ -192,6 +194,24 @@ fun SpreadsheetFullscreenViewer(
     var barsVisible by rememberSaveable { mutableStateOf(true) }
     val listState = rememberLazyListState()
     var scrollX by rememberSaveable { mutableFloatStateOf(0f) }
+
+    // Keep bars visible while search or edit is active
+    LaunchedEffect(listState, isSearching, state.isEditing) {
+        var previousIndex = 0
+        var previousOffset = 0
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                if (!isSearching && !state.isEditing) {
+                    val scrolledDown = index > previousIndex || (index == previousIndex && offset > previousOffset)
+                    barsVisible = !scrolledDown
+                } else {
+                    barsVisible = true
+                }
+                previousIndex = index
+                previousOffset = offset
+            }
+    }
 
     // Zoom / pan state
     var scale by rememberSaveable { mutableFloatStateOf(1f) }
@@ -1063,7 +1083,14 @@ fun SpreadsheetFullscreenViewer(
         }
 
         // ── Edit FAB ────────────────────────────────────────────────────────
-        if (state.request.canEdit && !state.isEditing && !isSearching && barsVisible) {
+        AnimatedVisibility(
+            visible = state.request.canEdit && !state.isEditing && !isSearching && barsVisible,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(160)) { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 22.dp, bottom = if (content.sheets.size > 1) 68.dp else 28.dp)
+        ) {
             FloatingActionButton(
                 onClick = {
                     haptics.performHapticFeedback()
@@ -1073,8 +1100,6 @@ fun SpreadsheetFullscreenViewer(
                 containerColor = ExcelUi.ExcelGreenSubtle,
                 contentColor = ExcelUi.ExcelGreen,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 22.dp, bottom = if (content.sheets.size > 1) 68.dp else 28.dp)
                     .size(58.dp)
                     .neonGlow(color = ExcelUi.ExcelGreen, radius = 12.dp, shape = CircleShape)
                     .border(1.5.dp, ExcelUi.ExcelGreen, CircleShape)

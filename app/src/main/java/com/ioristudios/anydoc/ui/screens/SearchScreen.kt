@@ -2,6 +2,10 @@ package com.ioristudios.anydoc.ui.screens
 
 import kotlin.OptIn
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.input.pointer.pointerInput
+import com.ioristudios.anydoc.ui.components.FileTypeIconRegistry
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -60,11 +64,20 @@ fun SearchScreen(
 ) {
     var query by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(initialFilter) }
+    var totalDragX by remember { mutableStateOf(0f) }
+    val chipListState = rememberLazyListState()
     
     LaunchedEffect(initialFilter) {
         selectedFilter = initialFilter
     }
     val filters = listOf("All", "PDF", "Word", "Excel", "PPT", "TXT", "Code")
+    
+    LaunchedEffect(selectedFilter) {
+        val index = filters.indexOf(selectedFilter)
+        if (index >= 0) {
+            chipListState.animateScrollToItem(index)
+        }
+    }
     val spacing = rememberAppSpacing()
     var contentVisible by remember { mutableStateOf(false) }
     var isSelectionMode by remember { mutableStateOf(false) }
@@ -134,7 +147,32 @@ fun SearchScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .pointerInput(selectedFilter) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDragX = 0f },
+                        onDragEnd = {
+                            val swipeThreshold = 100f
+                            val currentIndex = filters.indexOf(selectedFilter)
+                            if (totalDragX > swipeThreshold) {
+                                // Swipe right (finger moves left-to-right) -> previous filter
+                                if (currentIndex > 0) {
+                                    selectedFilter = filters[currentIndex - 1]
+                                }
+                            } else if (totalDragX < -swipeThreshold) {
+                                // Swipe left (finger moves right-to-left) -> next filter
+                                if (currentIndex < filters.lastIndex) {
+                                    selectedFilter = filters[currentIndex + 1]
+                                }
+                            }
+                        },
+                        onDragCancel = { totalDragX = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            totalDragX += dragAmount
+                        }
+                    )
+                },
             contentPadding = PaddingValues(bottom = spacing.sectionGap),
             verticalArrangement = Arrangement.spacedBy(spacing.itemGap)
         ) {
@@ -151,12 +189,30 @@ fun SearchScreen(
                         query = query,
                         onQueryChange = { query = it }
                     )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(spacing.chipGap)) {
+                    LazyRow(
+                        state = chipListState,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.chipGap)
+                    ) {
                         items(filters) { filter ->
+                            val resolvedName = when (filter) {
+                                "All" -> "folder"
+                                "PDF" -> "sample.pdf"
+                                "Word" -> "sample.docx"
+                                "Excel" -> "sample.xlsx"
+                                "PPT" -> "sample.pptx"
+                                "TXT" -> "sample.txt"
+                                "Code" -> "sample.kt"
+                                else -> "file"
+                            }
+                            val visual = FileTypeIconRegistry.resolveFileVisual(resolvedName)
                             FilterChip(
                                 label = filter,
                                 isSelected = selectedFilter == filter,
-                                onClick = { selectedFilter = filter }
+                                onClick = { selectedFilter = filter },
+                                activeColor = visual.accentColor,
+                                activeContainerColor = visual.containerColor.copy(alpha = 0.35f),
+                                activeBorderColor = visual.borderColor,
+                                activeGlowColor = visual.glowColor
                             )
                         }
                     }

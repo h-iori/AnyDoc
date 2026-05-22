@@ -84,6 +84,21 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.runtime.rememberUpdatedState
+import com.ioristudios.anydoc.model.SearchMatch
 import com.ioristudios.anydoc.model.DocumentContent
 import com.ioristudios.anydoc.model.DocumentKind
 import com.ioristudios.anydoc.model.DocumentViewerState
@@ -399,6 +414,8 @@ private fun buildPlainHighlighted(
 // MAIN COMPOSABLE
 // ═══════════════════════════════════════════════════════════════════════════════
 
+private val TOP_BAR_HEIGHT = 56.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TextDocumentFullscreenViewer(
@@ -446,32 +463,147 @@ fun TextDocumentFullscreenViewer(
         com.ioristudios.anydoc.ui.theme.getAccentForExtension(state.request.extension)
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        floatingActionButton = {
-            if (state.request.canEdit && !state.isEditing && !isSearching) {
-                FloatingActionButton(
-                    onClick = {
-                        haptics.performHapticFeedback()
-                        if (isMarkdown) {
-                            markdownPreviewMode = false
+    var barsVisible by remember { mutableStateOf(true) }
+    val scrollStateV = rememberScrollState()
+
+    // Keep bars visible while search or edit is active
+    LaunchedEffect(scrollStateV, isSearching, state.isEditing) {
+        var previousValue = 0
+        snapshotFlow { scrollStateV.value }
+            .distinctUntilChanged()
+            .collect { value ->
+                if (!isSearching && !state.isEditing) {
+                    val scrolledDown = value > previousValue
+                    barsVisible = !scrolledDown
+                } else {
+                    barsVisible = true
+                }
+                previousValue = value
+            }
+    }
+
+    val onMarkdownScroll: (Boolean) -> Unit = { scrolledDown ->
+        if (!isSearching && !state.isEditing) {
+            barsVisible = !scrolledDown
+        } else {
+            barsVisible = true
+        }
+    }
+
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topContentOffset = TOP_BAR_HEIGHT + statusBarPadding
+
+    val animatedTopPadding by animateDpAsState(
+        targetValue = if (barsVisible) topContentOffset else statusBarPadding,
+        animationSpec = tween(200),
+        label = "topPadding"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = animatedTopPadding)
+        ) {
+            // ─── Editor / Preview Surface ────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                val zoom = event.calculateZoom()
+                                if (zoom != 1.0f) {
+                                    fontScale = (fontScale * zoom).coerceIn(minScale, maxScale)
+                                }
+                            } while (event.changes.any { it.pressed })
                         }
-                        onEdit()
-                    },
-                    shape = CircleShape,
-                    containerColor = accentColor.copy(alpha = 0.15f),
-                    contentColor = accentColor,
-                    modifier = Modifier
-                        .size(58.dp)
-                        .neonGlow(color = accentColor, radius = 12.dp, shape = CircleShape)
-                        .border(1.5.dp, accentColor, CircleShape)
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit file")
+                    }
+            ) {
+                val searchQuery = if (isSearching) state.searchQuery else ""
+                val activeMatchIndex = state.activeMatch
+
+                when {
+                    // Markdown preview mode
+                    isMarkdown && markdownPreviewMode && !state.isEditing -> {
+                        MarkdownPreviewSurface(
+                            markdownText = content.text,
+                            fontScale = fontScale,
+                            searchQuery = searchQuery,
+                            activeMatchIndex = activeMatchIndex,
+                            onScroll = onMarkdownScroll
+                        )
+                    }
+                    // Editing mode (plain text editor for any file type)
+                    state.isEditing -> {
+                        CodeEditorSurface(
+                            text = state.editedText,
+                            isEditing = true,
+                            isCodeLike = content.isCodeLike || (isMarkdown && !markdownPreviewMode),
+                            extension = if (isMarkdown) "md" else state.request.extension,
+                            fontScale = fontScale,
+                            searchQuery = searchQuery,
+                            activeMatchIndex = activeMatchIndex,
+                            searchMatches = state.searchMatches,
+                            scrollStateV = scrollStateV,
+                            onTextChange = onTextChange,
+                            onCursorChange = { pos, sel ->
+                                cursorPosition = pos
+                                selectionLength = sel
+                            }
+                        )
+                    }
+                    // Read-only code/text view
+                    else -> {
+                        CodeEditorSurface(
+                            text = content.text,
+                            isEditing = false,
+                            isCodeLike = content.isCodeLike,
+                            extension = state.request.extension,
+                            fontScale = fontScale,
+                            searchQuery = searchQuery,
+                            activeMatchIndex = activeMatchIndex,
+                            searchMatches = state.searchMatches,
+                            scrollStateV = scrollStateV,
+                            onTextChange = {},
+                            onCursorChange = { pos, sel ->
+                                cursorPosition = pos
+                                selectionLength = sel
+                            }
+                        )
+                    }
                 }
             }
-        },
-        topBar = {
+
+            // ─── Status Line ─────────────────────────────────────────────────
+            StatusLine(
+                encoding = "UTF-8",
+                lineCount = lineCount,
+                charCount = charCount,
+                cursorPosition = cursorPosition,
+                selectionLength = selectionLength,
+                zoomPercent = zoomPercent,
+                isModified = isModified,
+                extension = state.request.extension,
+                isMarkdownPreview = isMarkdown && markdownPreviewMode && !state.isEditing,
+                accentColor = accentColor
+            )
+        }
+
+        // Top bar overlay
+        AnimatedVisibility(
+            visible = barsVisible,
+            enter = slideInVertically(tween(200)) { -it } + fadeIn(tween(200)),
+            exit = slideOutVertically(tween(200)) { -it } + fadeOut(tween(200)),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
             if (isSearching) {
                 // ─── Search TopBar ────────────────────────────────────────
                 TopAppBar(
@@ -647,100 +779,63 @@ fun TextDocumentFullscreenViewer(
                 )
             }
         }
-    ) { paddingValues ->
-        Column(
+
+        // Edit FAB Overlay
+        AnimatedVisibility(
+            visible = state.request.canEdit && !state.isEditing && !isSearching && barsVisible,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
+            exit = fadeOut(tween(160)) + slideOutVertically(tween(160)) { it / 2 },
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
+                .align(Alignment.BottomEnd)
+                .padding(end = 22.dp, bottom = 28.dp)
         ) {
-            // ─── Editor / Preview Surface ────────────────────────────────────
-            Box(
+            FloatingActionButton(
+                onClick = {
+                    haptics.performHapticFeedback()
+                    if (isMarkdown) {
+                        markdownPreviewMode = false
+                    }
+                    onEdit()
+                },
+                shape = CircleShape,
+                containerColor = accentColor.copy(alpha = 0.15f),
+                contentColor = accentColor,
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            do {
-                                val event = awaitPointerEvent()
-                                val zoom = event.calculateZoom()
-                                if (zoom != 1.0f) {
-                                    fontScale = (fontScale * zoom).coerceIn(minScale, maxScale)
-                                }
-                            } while (event.changes.any { it.pressed })
-                        }
-                    }
+                    .size(58.dp)
+                    .neonGlow(color = accentColor, radius = 12.dp, shape = CircleShape)
+                    .border(1.5.dp, accentColor, CircleShape)
             ) {
-                val searchQuery = if (isSearching) state.searchQuery else ""
-                val activeMatchIndex = state.activeMatch
-
-                when {
-                    // Markdown preview mode
-                    isMarkdown && markdownPreviewMode && !state.isEditing -> {
-                        MarkdownPreviewSurface(
-                            markdownText = content.text,
-                            fontScale = fontScale,
-                            searchQuery = searchQuery,
-                            activeMatchIndex = activeMatchIndex
-                        )
-                    }
-                    // Editing mode (plain text editor for any file type)
-                    state.isEditing -> {
-                        CodeEditorSurface(
-                            text = state.editedText,
-                            isEditing = true,
-                            isCodeLike = content.isCodeLike || (isMarkdown && !markdownPreviewMode),
-                            extension = if (isMarkdown) "md" else state.request.extension,
-                            fontScale = fontScale,
-                            searchQuery = searchQuery,
-                            activeMatchIndex = activeMatchIndex,
-                            onTextChange = onTextChange,
-                            onCursorChange = { pos, sel ->
-                                cursorPosition = pos
-                                selectionLength = sel
-                            }
-                        )
-                    }
-                    // Read-only code/text view
-                    else -> {
-                        CodeEditorSurface(
-                            text = content.text,
-                            isEditing = false,
-                            isCodeLike = content.isCodeLike,
-                            extension = state.request.extension,
-                            fontScale = fontScale,
-                            searchQuery = searchQuery,
-                            activeMatchIndex = activeMatchIndex,
-                            onTextChange = {},
-                            onCursorChange = { pos, sel ->
-                                cursorPosition = pos
-                                selectionLength = sel
-                            }
-                        )
-                    }
-                }
+                Icon(Icons.Default.Edit, contentDescription = "Edit file")
             }
-
-            // ─── Status Line ─────────────────────────────────────────────────
-            StatusLine(
-                encoding = "UTF-8",
-                lineCount = lineCount,
-                charCount = charCount,
-                cursorPosition = cursorPosition,
-                selectionLength = selectionLength,
-                zoomPercent = zoomPercent,
-                isModified = isModified,
-                extension = state.request.extension,
-                isMarkdownPreview = isMarkdown && markdownPreviewMode && !state.isEditing,
-                accentColor = accentColor
-            )
         }
+
+        // Snackbar overlay
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CODE / TEXT EDITOR SURFACE (Read-only + Editing)
 // ═══════════════════════════════════════════════════════════════════════════════
+
+private fun findActiveMatchOffset(displayedText: String, searchQuery: String, activeIndex: Int): Int {
+    if (searchQuery.isEmpty() || activeIndex < 0) return -1
+    var cursor = 0
+    var occurrence = 0
+    while (cursor < displayedText.length) {
+        val found = displayedText.indexOf(searchQuery, cursor, ignoreCase = true)
+        if (found == -1) break
+        if (occurrence == activeIndex) {
+            return found
+        }
+        cursor = found + searchQuery.length
+        occurrence++
+    }
+    return -1
+}
 
 @Composable
 private fun CodeEditorSurface(
@@ -751,6 +846,8 @@ private fun CodeEditorSurface(
     fontScale: Float,
     searchQuery: String,
     activeMatchIndex: Int,
+    searchMatches: List<SearchMatch>,
+    scrollStateV: androidx.compose.foundation.ScrollState,
     onTextChange: (String) -> Unit,
     onCursorChange: (Int, Int) -> Unit
 ) {
@@ -758,8 +855,33 @@ private fun CodeEditorSurface(
     val scaledFontSize = baseFontSize * fontScale
     val fontFamily = if (isCodeLike) FontFamily.Monospace else FontFamily.Default
 
-    val scrollStateV = rememberScrollState()
     val scrollStateH = rememberScrollState()
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    LaunchedEffect(activeMatchIndex, textLayoutResult, searchQuery) {
+        val layout = textLayoutResult
+        if (layout != null && searchQuery.isNotEmpty() && activeMatchIndex >= 0) {
+            val displayedText = layout.layoutInput.text.text
+            val offset = findActiveMatchOffset(displayedText, searchQuery, activeMatchIndex)
+            if (offset in 0..displayedText.length) {
+                val rect = layout.getCursorRect(offset)
+                val viewportHeight = scrollStateV.viewportSize
+                val viewportWidth = scrollStateH.viewportSize
+                val targetY = if (viewportHeight > 0) {
+                    (rect.center.y - viewportHeight / 2f).coerceIn(0f, scrollStateV.maxValue.toFloat())
+                } else {
+                    rect.top
+                }
+                val targetX = if (viewportWidth > 0) {
+                    (rect.center.x - viewportWidth / 2f).coerceIn(0f, scrollStateH.maxValue.toFloat())
+                } else {
+                    rect.left
+                }
+                scrollStateV.animateScrollTo(targetY.roundToInt())
+                scrollStateH.animateScrollTo(targetX.roundToInt())
+            }
+        }
+    }
 
     if (isEditing) {
         // Editable BasicTextField
@@ -783,6 +905,7 @@ private fun CodeEditorSurface(
                 onTextChange(newValue.text)
                 onCursorChange(newValue.selection.start, newValue.selection.length)
             },
+            onTextLayout = { textLayoutResult = it },
             textStyle = TextStyle(
                 fontFamily = fontFamily,
                 fontSize = scaledFontSize,
@@ -822,6 +945,7 @@ private fun CodeEditorSurface(
             ) {
                 Text(
                     text = annotated,
+                    onTextLayout = { textLayoutResult = it },
                     style = TextStyle(
                         fontFamily = fontFamily,
                         fontSize = scaledFontSize,
@@ -843,8 +967,10 @@ private fun MarkdownPreviewSurface(
     markdownText: String,
     fontScale: Float,
     searchQuery: String,
-    activeMatchIndex: Int
+    activeMatchIndex: Int,
+    onScroll: (Boolean) -> Unit
 ) {
+    val currentOnScroll by rememberUpdatedState(onScroll)
     val density = LocalDensity.current
     val baseFontSizeSp = 16f * fontScale
     val baseFontSizePx = with(density) { (16.sp * fontScale).toPx() }
@@ -862,6 +988,11 @@ private fun MarkdownPreviewSurface(
                 isVerticalScrollBarEnabled = true
                 isSmoothScrollingEnabled = true
                 overScrollMode = ScrollView.OVER_SCROLL_ALWAYS
+                setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                    if (scrollY != oldScrollY) {
+                        currentOnScroll(scrollY > oldScrollY)
+                    }
+                }
 
                 val tv = TextView(ctx).apply {
                     setTextColor(textColor.toArgb())
@@ -920,6 +1051,7 @@ private fun applySearchHighlightsToTextView(
     val text = spannable.toString()
     var cursor = 0
     var localMatchIdx = 0
+    var activeMatchOffset = -1
 
     while (cursor < text.length) {
         val found = text.indexOf(searchQuery, cursor, ignoreCase = true)
@@ -941,9 +1073,30 @@ private fun applySearchHighlightsToTextView(
                 found + searchQuery.length,
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
+            activeMatchOffset = found
         }
         cursor = found + searchQuery.length
         localMatchIdx++
+    }
+
+    if (activeMatchOffset != -1) {
+        tv.post {
+            val layout = tv.layout
+            val scrollView = tv.parent as? ScrollView
+            if (layout != null && scrollView != null) {
+                val line = layout.getLineForOffset(activeMatchOffset)
+                val lineTop = layout.getLineTop(line)
+                val lineBottom = layout.getLineBottom(line)
+                val matchY = (lineTop + lineBottom) / 2 + tv.paddingTop
+                val scrollViewHeight = scrollView.height
+                val targetY = if (scrollViewHeight > 0) {
+                    matchY - scrollViewHeight / 2
+                } else {
+                    matchY
+                }
+                scrollView.smoothScrollTo(0, Math.max(0, targetY))
+            }
+        }
     }
 }
 

@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.Role
 import com.ioristudios.anydoc.ui.theme.AppColors
@@ -28,22 +29,26 @@ fun FilterChip(
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    activeColor: Color = AppColors.Brand,
+    activeContainerColor: Color = AppColors.Brand.copy(alpha = 0.24f),
+    activeBorderColor: Color = AppColors.BrandStrong,
+    activeGlowColor: Color = AppColors.Brand.copy(alpha = AppGlow.StrongAlpha)
 ) {
     val spacing = rememberAppSpacing()
     val bgColor = animateColorAsState(
-        targetValue = if (isSelected) AppColors.Brand.copy(alpha = 0.24f) else AppColors.SurfaceElevated,
+        targetValue = if (isSelected) activeContainerColor else AppColors.SurfaceElevated,
         animationSpec = tween(AppMotion.Normal, easing = AppMotion.StandardEasing),
         label = "chipBg"
     )
 
     val borderColor = animateColorAsState(
-        targetValue = if (isSelected) AppColors.BrandStrong else AppColors.BorderSubtle,
+        targetValue = if (isSelected) activeBorderColor else AppColors.BorderSubtle,
         animationSpec = tween(AppMotion.Normal, easing = AppMotion.StandardEasing),
         label = "chipBorder"
     )
     val textColor = animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = if (isSelected) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(AppMotion.Normal, easing = AppMotion.StandardEasing),
         label = "chipText"
     )
@@ -61,7 +66,7 @@ fun FilterChip(
             .background(bgColor.value, PillShape)
             .border(width = 1.dp, color = borderColor.value, shape = PillShape)
             .neonGlow(
-                color = if (isSelected) AppColors.Brand.copy(alpha = AppGlow.StrongAlpha) else AppColors.Brand.copy(alpha = 0.12f),
+                color = if (isSelected) activeGlowColor else AppColors.Brand.copy(alpha = 0.12f),
                 radius = if (isSelected) AppGlow.Md else AppGlow.Sm,
                 shape = PillShape
             )
