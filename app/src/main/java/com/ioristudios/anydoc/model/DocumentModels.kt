@@ -75,7 +75,8 @@ data class DocxParagraph(
     val spacingAfterTwips: Int = 120,
     val lineSpacingTwips: Int? = null,
     val listLevel: Int = 0,
-    val isNumbered: Boolean = false
+    val isNumbered: Boolean = false,
+    val originalIndex: Int = -1
 )
 
 data class DocxTableCell(
@@ -136,7 +137,8 @@ sealed class DocumentViewerState {
         val activeMatch: Int = -1,
         val message: String? = null,
         val isSaving: Boolean = false,
-        val wordLayoutPages: List<com.ioristudios.anydoc.model.LayoutPage> = emptyList()
+        val wordLayoutPages: List<com.ioristudios.anydoc.model.LayoutPage> = emptyList(),
+        val editedWordParagraphs: Map<Int, String> = emptyMap()
     ) : DocumentViewerState()
 
     data class Error(

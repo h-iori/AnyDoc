@@ -36,26 +36,115 @@ object DocumentFileIo {
             .ifEmpty { listOf(extractXmlText(xml).joinToString(" ").trim()) }
     }
 
-    fun writeDocxText(path: String, text: String) {
+    fun writeDocxInPlace(path: String, editedParagraphs: Map<Int, String>) {
         val originalXml = readZipEntry(path, "word/document.xml")
             ?: error("word/document.xml not found")
-        val bodyMatch = Regex("<w:body[^>]*>(.*)</w:body>", RegexOption.DOT_MATCHES_ALL)
-            .find(originalXml) ?: error("DOCX body not found")
-        val body = bodyMatch.groupValues[1]
-        val sectPr = Regex("<w:sectPr[\\s\\S]*?</w:sectPr>").find(body)?.value.orEmpty()
-        val paragraphs = text
-            .lineSequence()
-            .map { it.trimEnd() }
-            .filter { it.isNotBlank() }
-            .joinToString("") { paragraph ->
-                "<w:p><w:r><w:t xml:space=\"preserve\">${escapeXml(paragraph)}</w:t></w:r></w:p>"
+        val db = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+        }.newDocumentBuilder()
+        val doc = db.parse(ByteArrayInputStream(originalXml.toByteArray(utf8)))
+        val body = doc.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "body").item(0)
+            ?: doc.getElementsByTagName("w:body").item(0)
+            ?: error("Document body not found")
+
+        val pNodes = mutableListOf<Node>()
+        val children = body.childNodes
+        for (i in 0 until children.length) {
+            collectParagraphNodes(children.item(i), pNodes)
+        }
+
+        for (index in pNodes.indices) {
+            val pNode = pNodes[index]
+            val newText = editedParagraphs[index] ?: continue
+
+            val toRemove = mutableListOf<Node>()
+            val pChildren = pNode.childNodes
+            for (i in 0 until pChildren.length) {
+                val child = pChildren.item(i)
+                val childName = child.localName ?: child.nodeName.substringAfter(':')
+                if (childName != "pPr" && childName != "pStyle") {
+                    if (childName == "r") {
+                        if (!hasPreservedElements(child)) {
+                            toRemove.add(child)
+                        }
+                    } else {
+                        toRemove.add(child)
+                    }
+                }
             }
-            .ifBlank { "<w:p><w:r><w:t></w:t></w:r></w:p>" }
-        val updatedXml = originalXml.replaceRange(
-            bodyMatch.range,
-            "<w:body>$paragraphs$sectPr</w:body>"
+
+            for (node in toRemove) {
+                pNode.removeChild(node)
+            }
+
+            val nsUri = pNode.namespaceURI ?: "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            val prefix = pNode.prefix ?: "w"
+            val rTag = if (prefix.isNotEmpty()) "$prefix:r" else "r"
+            val tTag = if (prefix.isNotEmpty()) "$prefix:t" else "t"
+
+            val rNode = doc.createElementNS(nsUri, rTag)
+            val tNode = doc.createElementNS(nsUri, tTag)
+            tNode.setAttribute("xml:space", "preserve")
+            tNode.textContent = newText
+
+            rNode.appendChild(tNode)
+            pNode.appendChild(rNode)
+        }
+
+        val transformerFactory = javax.xml.transform.TransformerFactory.newInstance()
+        val transformer = transformerFactory.newTransformer()
+        transformer.setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "no")
+        val writer = java.io.StringWriter()
+        transformer.transform(
+            javax.xml.transform.dom.DOMSource(doc),
+            javax.xml.transform.stream.StreamResult(writer)
         )
+        val updatedXml = writer.toString()
         replaceZipEntry(path, "word/document.xml", updatedXml.toByteArray(utf8))
+    }
+
+    private fun collectParagraphNodes(node: Node, outList: MutableList<Node>) {
+        val name = node.localName ?: node.nodeName.substringAfter(':')
+        when (name) {
+            "p" -> {
+                outList.add(node)
+            }
+            "tbl" -> {
+                val children = node.childNodes
+                for (i in 0 until children.length) {
+                    val child = children.item(i)
+                    val childName = child.localName ?: child.nodeName.substringAfter(':')
+                    if (childName == "tr") {
+                        val trChildren = child.childNodes
+                        for (j in 0 until trChildren.length) {
+                            val trChild = trChildren.item(j)
+                            val trChildName = trChild.localName ?: trChild.nodeName.substringAfter(':')
+                            if (trChildName == "tc") {
+                                val tcChildren = trChild.childNodes
+                                for (k in 0 until tcChildren.length) {
+                                    collectParagraphNodes(tcChildren.item(k), outList)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun hasPreservedElements(node: Node): Boolean {
+        val name = node.localName ?: node.nodeName.substringAfter(':')
+        if (name == "drawing" || name == "object") return true
+        if (name == "br") {
+            val typeAttr = node.attributes?.getNamedItemNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "type")?.nodeValue
+                ?: node.attributes?.getNamedItem("w:type")?.nodeValue
+            if (typeAttr == "page") return true
+        }
+        val children = node.childNodes
+        for (i in 0 until children.length) {
+            if (hasPreservedElements(children.item(i))) return true
+        }
+        return false
     }
 
     fun readXlsxRows(path: String): List<List<String>> {

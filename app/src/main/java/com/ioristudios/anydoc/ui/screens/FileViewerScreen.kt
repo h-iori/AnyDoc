@@ -148,6 +148,69 @@ import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.unit.TextUnit
+
+private data class FlatParagraph(
+    val para: DocxParagraph,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float
+)
+
+private fun collectFlatParagraphs(
+    elements: List<PositionedElement>,
+    offsetX: Float,
+    offsetY: Float,
+    outList: MutableList<FlatParagraph>
+) {
+    for (element in elements) {
+        when (element) {
+            is PositionedElement.Paragraph -> {
+                outList.add(
+                    FlatParagraph(
+                        para = element.para,
+                        x = offsetX + element.x,
+                        y = offsetY + element.y,
+                        width = element.width,
+                        height = element.height
+                    )
+                )
+            }
+            is PositionedElement.Table -> {
+                val cellWidths = element.cellWidths
+                val rowHeights = element.rowHeights
+                val tableAbsX = offsetX + element.x
+                val tableAbsY = offsetY + element.y
+
+                var currentY = 0f
+                element.table.rows.forEachIndexed { rowIndex, row ->
+                    val rowHeight = rowHeights.getOrNull(rowIndex) ?: 20f
+                    var currentX = 0f
+                    row.cells.forEachIndexed { cellIndex, _ ->
+                        val cellWidth = cellWidths.getOrNull(cellIndex) ?: 80f
+                        val cellContent = element.cellElements.getOrNull(rowIndex)?.getOrNull(cellIndex) ?: emptyList()
+                        collectFlatParagraphs(
+                            elements = cellContent,
+                            offsetX = tableAbsX + currentX,
+                            offsetY = tableAbsY + currentY,
+                            outList = outList
+                        )
+                        currentX += cellWidth
+                    }
+                    currentY += rowHeight
+                }
+            }
+            is PositionedElement.Image -> {}
+        }
+    }
+}
+
 
 // ─── Highlight colours ────────────────────────────────────────────────────────
 private val HighlightNormal = Color(0xFFFFE066)   // yellow
@@ -395,8 +458,8 @@ fun FileViewerScreen(
             onSave = {
                 viewModel.save()
             },
-            onTextChange = {
-                viewModel.updateEditedText(it)
+            onParagraphTextChange = { index, text ->
+                viewModel.updateWordParagraphText(index, text)
             },
             snackbarHostState = snackbarHostState
         )
@@ -1511,10 +1574,9 @@ private fun WordFullscreenViewer(
     onEdit: () -> Unit,
     onExitEdit: () -> Unit,
     onSave: () -> Unit,
-    onTextChange: (String) -> Unit,
+    onParagraphTextChange: (Int, String) -> Unit,
     snackbarHostState: SnackbarHostState
 ) {
-    val content = state.content as DocumentContent.WordDocumentContent
     val haptics = com.ioristudios.anydoc.ui.utils.rememberAppHaptics()
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
@@ -1663,233 +1725,174 @@ private fun WordFullscreenViewer(
             .fillMaxSize()
             .background(WordUi.WordCanvasGray)
     ) {
-        if (state.isEditing) {
-            // Text Editor View
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = animatedTopPadding)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .widthIn(max = WordUi.PageMaxWidth)
-                            .weight(1f)
-                            .shadow(10.dp, RoundedCornerShape(2.dp), ambientColor = WordUi.WordShadow, spotColor = WordUi.WordShadow),
-                        shape = RoundedCornerShape(2.dp),
-                        colors = CardDefaults.cardColors(containerColor = WordUi.WordPageWhite)
-                    ) {
-                        OutlinedTextField(
-                            value = state.editedText,
-                            onValueChange = onTextChange,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = WordUi.PageHorizontalMargin, vertical = WordUi.PageVerticalMargin),
-                            textStyle = TextStyle(
-                                fontSize = 15.sp,
-                                lineHeight = 22.sp,
-                                color = WordUi.WordTextBlack
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedContainerColor = WordUi.WordPageWhite,
-                                unfocusedContainerColor = WordUi.WordPageWhite,
-                                focusedTextColor = WordUi.WordTextBlack,
-                                unfocusedTextColor = WordUi.WordTextBlack,
-                                cursorColor = WordUi.WordBlue
-                            )
-                        )
-                    }
+        // Word pages list inside Zoom container
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = animatedTopPadding)
+                .pointerInput(totalPages) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        flingJobX?.cancel()
+                        flingJobY?.cancel()
+                        val velocityTracker = VelocityTracker()
+                        velocityTracker.addPosition(down.uptimeMillis, down.position)
 
-                    if (state.isSaving) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Saving...", color = WordUi.WordSecondaryText)
-                        }
-                    }
-                }
-            }
-        } else {
-            // Word pages list inside Zoom container
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = animatedTopPadding)
-                    .pointerInput(totalPages) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            flingJobX?.cancel()
-                            flingJobY?.cancel()
-                            val velocityTracker = VelocityTracker()
-                            velocityTracker.addPosition(down.uptimeMillis, down.position)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val changes = event.changes
+                            val activeChanges = changes.filter { it.pressed }
 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val changes = event.changes
-                                val activeChanges = changes.filter { it.pressed }
+                            if (activeChanges.isEmpty()) {
+                                if (scale > 1.1f) {
+                                    val velocity = velocityTracker.calculateVelocity()
+                                    val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
 
-                                if (activeChanges.isEmpty()) {
-                                    if (scale > 1.1f) {
-                                        val velocity = velocityTracker.calculateVelocity()
-                                        val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
-                                        val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
-
-                                        flingJobX = coroutineScope.launch {
-                                            Animatable(offsetX).animateDecay(
-                                                initialVelocity = velocity.x,
-                                                animationSpec = exponentialDecay()
-                                            ) {
-                                                offsetX = this.value.coerceIn(-maxPanX, maxPanX)
-                                            }
+                                    flingJobX = coroutineScope.launch {
+                                        Animatable(offsetX).animateDecay(
+                                            initialVelocity = velocity.x,
+                                            animationSpec = exponentialDecay()
+                                        ) {
+                                            offsetX = this.value.coerceIn(-maxPanX, maxPanX)
                                         }
-                                        flingJobY = coroutineScope.launch {
-                                            var lastValue = offsetY
-                                            Animatable(offsetY).animateDecay(
-                                                initialVelocity = velocity.y,
-                                                animationSpec = exponentialDecay()
-                                            ) {
-                                                val delta = this.value - lastValue
-                                                lastValue = this.value
-                                                val newOffsetY = offsetY + delta
-                                                if (newOffsetY > maxPanY) {
-                                                    offsetY = maxPanY
-                                                    val overscroll = newOffsetY - maxPanY
-                                                    lazyListState.dispatchRawDelta(-overscroll)
-                                                } else if (newOffsetY < -maxPanY) {
-                                                    offsetY = -maxPanY
-                                                    val overscroll = newOffsetY - (-maxPanY)
-                                                    lazyListState.dispatchRawDelta(-overscroll)
-                                                } else {
-                                                    offsetY = newOffsetY
-                                                }
+                                    }
+                                    flingJobY = coroutineScope.launch {
+                                        var lastValue = offsetY
+                                        Animatable(offsetY).animateDecay(
+                                            initialVelocity = velocity.y,
+                                            animationSpec = exponentialDecay()
+                                        ) {
+                                            val delta = this.value - lastValue
+                                            lastValue = this.value
+                                            val newOffsetY = offsetY + delta
+                                            if (newOffsetY > maxPanY) {
+                                                offsetY = maxPanY
+                                                val overscroll = newOffsetY - maxPanY
+                                                lazyListState.dispatchRawDelta(-overscroll)
+                                            } else if (newOffsetY < -maxPanY) {
+                                                offsetY = -maxPanY
+                                                val overscroll = newOffsetY - (-maxPanY)
+                                                lazyListState.dispatchRawDelta(-overscroll)
+                                            } else {
+                                                offsetY = newOffsetY
                                             }
                                         }
                                     }
-                                    isMultiTouch = false
-                                    break
                                 }
+                                isMultiTouch = false
+                                break
+                            }
 
-                                val isMulti = activeChanges.size >= 2
-                                isMultiTouch = isMulti
+                            val isMulti = activeChanges.size >= 2
+                            isMultiTouch = isMulti
 
-                                if (isMulti) {
-                                    val centroid = event.calculateCentroid(useCurrent = false)
-                                    val center = Offset(size.width / 2f, size.height / 2f)
-                                    val zoom = event.calculateZoom()
+                            if (isMulti) {
+                                val centroid = event.calculateCentroid(useCurrent = false)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                val scaleChange = newScale / scale
+
+                                if (newScale > 1f) {
+                                    val maxPanX = ((size.width * newScale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * newScale) - size.height).coerceAtLeast(0f) / 2f
+                                    offsetX = (offsetX * scaleChange - (centroid.x - center.x) * (scaleChange - 1) + pan.x).coerceIn(-maxPanX, maxPanX)
+                                    offsetY = (offsetY * scaleChange - (centroid.y - center.y) * (scaleChange - 1) + pan.y).coerceIn(-maxPanY, maxPanY)
+                                    scale = newScale
+                                } else {
+                                    scale = 1f; offsetX = 0f; offsetY = 0f
+                                }
+                                changes.forEach { it.consume() }
+                            } else {
+                                if (scale > 1f) {
+                                    val pointer = activeChanges.first()
+                                    velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
+
                                     val pan = event.calculatePan()
-                                    val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                    val scaleChange = newScale / scale
+                                    val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
+                                    val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
+                                    offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
 
-                                    if (newScale > 1f) {
-                                        val maxPanX = ((size.width * newScale) - size.width).coerceAtLeast(0f) / 2f
-                                        val maxPanY = ((size.height * newScale) - size.height).coerceAtLeast(0f) / 2f
-                                        offsetX = (offsetX * scaleChange - (centroid.x - center.x) * (scaleChange - 1) + pan.x).coerceIn(-maxPanX, maxPanX)
-                                        offsetY = (offsetY * scaleChange - (centroid.y - center.y) * (scaleChange - 1) + pan.y).coerceIn(-maxPanY, maxPanY)
-                                        scale = newScale
+                                    val newOffsetY = offsetY + pan.y
+                                    if (newOffsetY > maxPanY) {
+                                        offsetY = maxPanY
+                                        val overscroll = newOffsetY - maxPanY
+                                        lazyListState.dispatchRawDelta(-overscroll)
+                                    } else if (newOffsetY < -maxPanY) {
+                                        offsetY = -maxPanY
+                                        val overscroll = newOffsetY - (-maxPanY)
+                                        lazyListState.dispatchRawDelta(-overscroll)
                                     } else {
-                                        scale = 1f; offsetX = 0f; offsetY = 0f
+                                        offsetY = newOffsetY
                                     }
                                     changes.forEach { it.consume() }
-                                } else {
-                                    if (scale > 1f) {
-                                        val pointer = activeChanges.first()
-                                        velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
-
-                                        val pan = event.calculatePan()
-                                        val maxPanX = ((size.width * scale) - size.width).coerceAtLeast(0f) / 2f
-                                        val maxPanY = ((size.height * scale) - size.height).coerceAtLeast(0f) / 2f
-                                        offsetX = (offsetX + pan.x).coerceIn(-maxPanX, maxPanX)
-
-                                        val newOffsetY = offsetY + pan.y
-                                        if (newOffsetY > maxPanY) {
-                                            offsetY = maxPanY
-                                            val overscroll = newOffsetY - maxPanY
-                                            lazyListState.dispatchRawDelta(-overscroll)
-                                        } else if (newOffsetY < -maxPanY) {
-                                            offsetY = -maxPanY
-                                            val overscroll = newOffsetY - (-maxPanY)
-                                            lazyListState.dispatchRawDelta(-overscroll)
-                                        } else {
-                                            offsetY = newOffsetY
-                                        }
-                                        changes.forEach { it.consume() }
-                                    }
                                 }
                             }
                         }
                     }
-                    .pointerInput(isSearching) {
-                        detectTapGestures(
-                            onTap = { if (!isSearching) barsVisible = !barsVisible },
-                            onDoubleTap = { tapOffset ->
-                                flingJobX?.cancel()
-                                flingJobY?.cancel()
-                                if (scale > 1.1f) {
-                                    scale = 1f; offsetX = 0f; offsetY = 0f
-                                } else {
-                                    val targetScale = 2.5f
-                                    val center = Offset(size.width / 2f, size.height / 2f)
-                                    val maxPanX = ((size.width * targetScale) - size.width).coerceAtLeast(0f) / 2f
-                                    val maxPanY = ((size.height * targetScale) - size.height).coerceAtLeast(0f) / 2f
-                                    offsetX = (-(tapOffset.x - center.x) * targetScale).coerceIn(-maxPanX, maxPanX)
-                                    offsetY = (-(tapOffset.y - center.y) * targetScale).coerceIn(-maxPanY, maxPanY)
-                                    scale = targetScale
-                                }
-                            }
-                        )
-                    }
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        translationX = offsetX
-                        translationY = offsetY
-                        transformOrigin = TransformOrigin.Center
-                    }
-            ) {
-                LazyColumn(
-                    state = lazyListState,
-                    userScrollEnabled = scale <= 1f && !isMultiTouch,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 18.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    itemsIndexed(pages) { index, page ->
-                        val matchesBeforePage = remember(pages, state.searchQuery, index) {
-                            if (state.searchQuery.isBlank()) 0 else {
-                                var count = 0
-                                for (i in 0 until index) {
-                                    count += countMatchesInPage(pages[i], state.searchQuery)
-                                }
-                                count
-                            }
-                        }
-                        WordPageItem(
-                            filePath = state.request.path,
-                            page = page,
-                            pageNumber = index + 1,
-                            totalPages = totalPages,
-                            searchQuery = if (isSearching) state.searchQuery else "",
-                            activeMatchIndex = state.activeMatch,
-                            matchesBeforePage = matchesBeforePage
-                        )
-                    }
-                    item { Spacer(modifier = Modifier.size(80.dp)) }
                 }
+                .pointerInput(isSearching) {
+                    detectTapGestures(
+                        onTap = { if (!isSearching && !state.isEditing) barsVisible = !barsVisible },
+                        onDoubleTap = { tapOffset ->
+                            flingJobX?.cancel()
+                            flingJobY?.cancel()
+                            if (scale > 1.1f) {
+                                scale = 1f; offsetX = 0f; offsetY = 0f
+                            } else {
+                                val targetScale = 2.5f
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val maxPanX = ((size.width * targetScale) - size.width).coerceAtLeast(0f) / 2f
+                                val maxPanY = ((size.height * targetScale) - size.height).coerceAtLeast(0f) / 2f
+                                offsetX = (-(tapOffset.x - center.x) * targetScale).coerceIn(-maxPanX, maxPanX)
+                                offsetY = (-(tapOffset.y - center.y) * targetScale).coerceIn(-maxPanY, maxPanY)
+                                scale = targetScale
+                            }
+                        }
+                    )
+                }
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
+                    transformOrigin = TransformOrigin.Center
+                }
+        ) {
+            LazyColumn(
+                state = lazyListState,
+                userScrollEnabled = scale <= 1f && !isMultiTouch,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 18.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                itemsIndexed(pages) { index, page ->
+                    val matchesBeforePage = remember(pages, state.searchQuery, index) {
+                        if (state.searchQuery.isBlank()) 0 else {
+                            var count = 0
+                            for (i in 0 until index) {
+                                count += countMatchesInPage(pages[i], state.searchQuery)
+                            }
+                            count
+                        }
+                    }
+                    WordPageItem(
+                        filePath = state.request.path,
+                        page = page,
+                        pageNumber = index + 1,
+                        totalPages = totalPages,
+                        searchQuery = if (isSearching) state.searchQuery else "",
+                        activeMatchIndex = state.activeMatch,
+                        matchesBeforePage = matchesBeforePage,
+                        isEditing = state.isEditing,
+                        editedWordParagraphs = state.editedWordParagraphs,
+                        onParagraphTextChange = onParagraphTextChange
+                    )
+                }
+                item { Spacer(modifier = Modifier.size(80.dp)) }
             }
         }
 
@@ -1907,25 +1910,25 @@ private fun WordFullscreenViewer(
                             text = "Edit ${state.request.displayName}",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            color = WordUi.WordTextBlack,
+                            color = Color.White,
                             style = MaterialTheme.typography.titleMedium
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onExitEdit() }) {
-                            Icon(Icons.Default.Close, contentDescription = "Cancel", tint = WordUi.WordTextBlack)
+                            Icon(Icons.Default.Close, contentDescription = "Cancel", tint = AppColors.BrandStrong)
                         }
                     },
                     actions = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onSave() }) {
-                            Icon(Icons.Default.Save, contentDescription = "Save", tint = WordUi.WordBlue)
+                            Icon(Icons.Default.Save, contentDescription = "Save", tint = Color.White)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = WordUi.WordToolbarWhite.copy(alpha = 0.98f),
-                        titleContentColor = WordUi.WordTextBlack,
-                        navigationIconContentColor = WordUi.WordTextBlack,
-                        actionIconContentColor = WordUi.WordBlue
+                        containerColor = Color.Black.copy(alpha = 0.88f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = AppColors.BrandStrong,
+                        actionIconContentColor = Color.White
                     )
                 )
             } else if (isSearching) {
@@ -1934,7 +1937,7 @@ private fun WordFullscreenViewer(
                         OutlinedTextField(
                             value = state.searchQuery,
                             onValueChange = onSearchQueryChange,
-                            placeholder = { Text("Search in document", color = WordUi.WordSecondaryText) },
+                            placeholder = { Text("Search in document", color = Color.White.copy(alpha = 0.5f)) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
@@ -1942,15 +1945,15 @@ private fun WordFullscreenViewer(
                                 disabledContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
-                                cursorColor = WordUi.WordBlue
+                                cursorColor = AppColors.BrandStrong
                             ),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = WordUi.WordTextBlack),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
                             modifier = Modifier.fillMaxWidth()
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onSearchClose() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search", tint = WordUi.WordTextBlack)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search", tint = AppColors.BrandStrong)
                         }
                     },
                     actions = {
@@ -1959,7 +1962,7 @@ private fun WordFullscreenViewer(
                             else "${state.activeMatch + 1}/${state.searchMatches.size}"
                             Text(
                                 text = label,
-                                color = WordUi.WordSecondaryText,
+                                color = Color.White.copy(alpha = 0.8f),
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(horizontal = 8.dp)
                             )
@@ -1970,7 +1973,7 @@ private fun WordFullscreenViewer(
                                 Icon(
                                     Icons.Default.KeyboardArrowUp,
                                     contentDescription = "Previous",
-                                    tint = if (state.searchMatches.isNotEmpty()) WordUi.WordBlue else WordUi.WordSecondaryText.copy(alpha = 0.45f)
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
                                 )
                             }
                             IconButton(
@@ -1980,16 +1983,16 @@ private fun WordFullscreenViewer(
                                 Icon(
                                     Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Next",
-                                    tint = if (state.searchMatches.isNotEmpty()) WordUi.WordBlue else WordUi.WordSecondaryText.copy(alpha = 0.45f)
+                                    tint = if (state.searchMatches.isNotEmpty()) Color.White else Color.Gray
                                 )
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = WordUi.WordToolbarWhite.copy(alpha = 0.98f),
-                        titleContentColor = WordUi.WordTextBlack,
-                        navigationIconContentColor = WordUi.WordTextBlack,
-                        actionIconContentColor = WordUi.WordBlue
+                        containerColor = Color.Black.copy(alpha = 0.92f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = AppColors.BrandStrong,
+                        actionIconContentColor = Color.White
                     )
                 )
             } else {
@@ -2004,13 +2007,13 @@ private fun WordFullscreenViewer(
                                 text = state.request.displayName,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = WordUi.WordTextBlack,
+                                color = Color.White,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
                                 text = "${state.request.extension.uppercase()} - $totalPages pages",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = WordUi.WordSecondaryText,
+                                color = Color.White.copy(alpha = 0.6f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2018,19 +2021,19 @@ private fun WordFullscreenViewer(
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onBack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = WordUi.WordTextBlack)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AppColors.BrandStrong)
                         }
                     },
                     actions = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onSearchOpen() }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search", tint = WordUi.WordBlue)
+                            Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.White)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = WordUi.WordToolbarWhite.copy(alpha = 0.98f),
-                        titleContentColor = WordUi.WordTextBlack,
-                        navigationIconContentColor = WordUi.WordTextBlack,
-                        actionIconContentColor = WordUi.WordBlue
+                        containerColor = Color.Black.copy(alpha = 0.88f),
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = AppColors.BrandStrong,
+                        actionIconContentColor = Color.White
                     )
                 )
             }
@@ -2180,6 +2183,32 @@ private fun WordFullscreenViewer(
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 16.dp)
         )
+
+        // Centering saving progress overlay
+        if (state.isSaving) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.5.dp, color = AppColors.BrandStrong)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Saving...", color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2198,7 +2227,7 @@ private fun WordFloatingEditButton(
         FloatingActionButton(
             onClick = onClick,
             shape = CircleShape,
-            containerColor = WordUi.WordBlue,
+            containerColor = AppColors.BrandStrong,
             contentColor = Color.White,
             modifier = Modifier
                 .size(58.dp)
@@ -2209,6 +2238,7 @@ private fun WordFloatingEditButton(
     }
 }
 
+
 @Composable
 private fun WordPageItem(
     filePath: String,
@@ -2217,13 +2247,19 @@ private fun WordPageItem(
     totalPages: Int,
     searchQuery: String,
     activeMatchIndex: Int,
-    matchesBeforePage: Int
+    matchesBeforePage: Int,
+    isEditing: Boolean,
+    editedWordParagraphs: Map<Int, String>,
+    onParagraphTextChange: (Int, String) -> Unit
 ) {
-    val cacheKey = "$filePath:$pageNumber:$searchQuery:$activeMatchIndex"
-    var bitmap by remember(cacheKey) { mutableStateOf<Bitmap?>(com.ioristudios.anydoc.util.RenderCache.get(cacheKey)) }
-    var error by remember(cacheKey) { mutableStateOf<String?>(null) }
+    val cacheKey = "$filePath:$pageNumber:$searchQuery:$activeMatchIndex:isEditing:$isEditing"
+    val renderTriggerKey = remember(page) { page.hashCode() }
+    var bitmap by remember(cacheKey, renderTriggerKey) {
+        mutableStateOf<Bitmap?>(com.ioristudios.anydoc.util.RenderCache.get("$cacheKey:$renderTriggerKey"))
+    }
+    var error by remember(cacheKey, renderTriggerKey) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(cacheKey) {
+    LaunchedEffect(cacheKey, renderTriggerKey) {
         if (bitmap != null) return@LaunchedEffect
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -2232,12 +2268,13 @@ private fun WordPageItem(
                     filePath = filePath,
                     searchQuery = searchQuery,
                     activeMatchIndex = activeMatchIndex,
-                    matchesBeforePage = matchesBeforePage
+                    matchesBeforePage = matchesBeforePage,
+                    hideParagraphText = isEditing
                 )
             }
         }
         result.onSuccess { bmp ->
-            com.ioristudios.anydoc.util.RenderCache.put(cacheKey, bmp)
+            com.ioristudios.anydoc.util.RenderCache.put("$cacheKey:$renderTriggerKey", bmp)
             bitmap = bmp
         }
         result.onFailure { err ->
@@ -2257,7 +2294,9 @@ private fun WordPageItem(
         shape = RoundedCornerShape(2.dp),
         colors = CardDefaults.cardColors(containerColor = WordUi.WordPageWhite)
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val scalePointsToDp = maxWidth / page.config.pageWidthPoints
+
             when {
                 error != null -> {
                     Box(
@@ -2276,7 +2315,7 @@ private fun WordPageItem(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = WordUi.WordBlue, modifier = Modifier.size(36.dp))
+                        CircularProgressIndicator(color = AppColors.BrandStrong, modifier = Modifier.size(36.dp))
                     }
                 }
                 else -> {
@@ -2286,6 +2325,110 @@ private fun WordPageItem(
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.FillWidth
                     )
+
+                    if (isEditing) {
+                        val flatParas = remember(page.elements) {
+                            val list = mutableListOf<FlatParagraph>()
+                            collectFlatParagraphs(
+                                page.elements,
+                                page.config.marginLeftPoints,
+                                page.config.marginTopPoints,
+                                list
+                            )
+                            list
+                        }
+
+                        flatParas.forEach { flatPara ->
+                            val pWidth = (flatPara.width * scalePointsToDp.value).dp
+                            val pHeight = (flatPara.height * scalePointsToDp.value).dp
+                            val pX = (flatPara.x * scalePointsToDp.value).dp
+                            val pY = (flatPara.y * scalePointsToDp.value).dp
+
+                            val textColor = remember(flatPara.para) {
+                                val hex = flatPara.para.spans.firstOrNull()?.color
+                                if (hex != null) {
+                                    try {
+                                        val cleanHex = hex.replace("#", "")
+                                        val colorInt = android.graphics.Color.parseColor(
+                                            if (cleanHex.length == 6) "#$cleanHex" else if (cleanHex.length == 8) "#$cleanHex" else "#000000"
+                                        )
+                                        Color(colorInt)
+                                    } catch (e: Exception) {
+                                        Color.Black
+                                    }
+                                } else {
+                                    Color.Black
+                                }
+                            }
+
+                            var isFocused by remember { mutableStateOf(false) }
+                            val textValue = remember(flatPara.para.originalIndex) {
+                                mutableStateOf(
+                                    editedWordParagraphs[flatPara.para.originalIndex]
+                                        ?: flatPara.para.spans.joinToString("") { it.text }
+                                )
+                            }
+
+                            LaunchedEffect(editedWordParagraphs[flatPara.para.originalIndex]) {
+                                val latest = editedWordParagraphs[flatPara.para.originalIndex]
+                                    ?: flatPara.para.spans.joinToString("") { it.text }
+                                if (latest != textValue.value) {
+                                    textValue.value = latest
+                                }
+                            }
+
+                            val firstSpan = flatPara.para.spans.firstOrNull()
+                            val fontSizeSp = ((firstSpan?.fontSize ?: 12f) * scalePointsToDp.value).sp
+                            val fontWeight = if (firstSpan?.bold == true) FontWeight.Bold else FontWeight.Normal
+                            val fontStyle = if (firstSpan?.italic == true) FontStyle.Italic else FontStyle.Normal
+                            val textDecoration = if (firstSpan?.underline == true) TextDecoration.Underline else TextDecoration.None
+                            val align = when (flatPara.para.alignment) {
+                                DocxTextAlignment.Start -> TextAlign.Start
+                                DocxTextAlignment.Center -> TextAlign.Center
+                                DocxTextAlignment.End -> TextAlign.End
+                                DocxTextAlignment.Justify -> TextAlign.Justify
+                            }
+                            val lineSpacingSp = flatPara.para.lineSpacingTwips?.let {
+                                ((it / 20f) * scalePointsToDp.value).sp
+                            }
+
+                            BasicTextField(
+                                value = textValue.value,
+                                onValueChange = { newText ->
+                                    textValue.value = newText
+                                    onParagraphTextChange(flatPara.para.originalIndex, newText)
+                                },
+                                modifier = Modifier
+                                    .offset(x = pX, y = pY)
+                                    .width(pWidth)
+                                    .heightIn(min = pHeight)
+                                    .onFocusChanged { isFocused = it.isFocused }
+                                    .background(
+                                        color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.05f) else Color.Transparent,
+                                        shape = RoundedCornerShape(2.dp)
+                                    )
+                                    .border(
+                                        width = 0.5.dp,
+                                        color = if (isFocused) AppColors.BrandStrong.copy(alpha = 0.4f) else Color.Transparent,
+                                        shape = RoundedCornerShape(2.dp)
+                                    )
+                                    .padding(horizontal = 2.dp),
+                                textStyle = TextStyle(
+                                    fontSize = fontSizeSp,
+                                    fontWeight = fontWeight,
+                                    fontStyle = fontStyle,
+                                    textDecoration = textDecoration,
+                                    textAlign = align,
+                                    color = textColor,
+                                    lineHeight = lineSpacingSp ?: TextUnit.Unspecified
+                                ),
+                                cursorBrush = SolidColor(AppColors.BrandStrong),
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences
+                                )
+                            )
+                        }
+                    }
                 }
             }
             Text(

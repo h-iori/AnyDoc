@@ -123,12 +123,17 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 } else {
                     emptyList()
                 }
+                val editedWordParasMap = mutableMapOf<Int, String>()
+                if (content is DocumentContent.WordDocumentContent) {
+                    collectParagraphsFromElements(content.elements, editedWordParasMap)
+                }
                 DocumentViewerState.Ready(
                     request = request,
                     content = content,
                     editedText = initialEditableText(content),
                     editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
-                    wordLayoutPages = wordLayoutPages
+                    wordLayoutPages = wordLayoutPages,
+                    editedWordParagraphs = editedWordParasMap
                 )
             }.onSuccess { ready ->
                 _uiState.value = ready
@@ -239,6 +244,30 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         _uiState.value = current.copy(editedText = text, message = null)
     }
 
+    private var layoutDebounceJob: kotlinx.coroutines.Job? = null
+
+    fun updateWordParagraphText(originalIndex: Int, newText: String) {
+        val current = _uiState.value as? DocumentViewerState.Ready ?: return
+        val newMap = current.editedWordParagraphs.toMutableMap().apply {
+            put(originalIndex, newText)
+        }
+        _uiState.value = current.copy(editedWordParagraphs = newMap)
+
+        layoutDebounceJob?.cancel()
+        layoutDebounceJob = viewModelScope.launch(Dispatchers.Default) {
+            kotlinx.coroutines.delay(800)
+            val docContent = current.content as? DocumentContent.WordDocumentContent ?: return@launch
+            
+            val updatedElements = updateElementsWithEdits(docContent.elements, newMap)
+            val newPages = MeasurementLayoutEngine().layoutDocument(updatedElements, LayoutConfig())
+            
+            val stateAfterDelay = _uiState.value as? DocumentViewerState.Ready ?: return@launch
+            _uiState.value = stateAfterDelay.copy(
+                wordLayoutPages = newPages
+            )
+        }
+    }
+
     fun updateCell(rowIndex: Int, columnIndex: Int, value: String) {
         val current = _uiState.value as? DocumentViewerState.Ready ?: return
         val source = current.editedRows.ifEmpty {
@@ -289,7 +318,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 when (current.request.extension) {
                     "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
                     "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
-                    "docx" -> DocumentFileIo.writeDocxText(localPath, current.editedText)
+                    "docx" -> DocumentFileIo.writeDocxInPlace(localPath, current.editedWordParagraphs)
                     else -> DocumentFileIo.writeText(localPath, current.editedText)
                 }
 
@@ -319,12 +348,17 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 } else {
                     emptyList()
                 }
+                val editedWordParasMap = mutableMapOf<Int, String>()
+                if (savedContent is DocumentContent.WordDocumentContent) {
+                    collectParagraphsFromElements(savedContent.elements, editedWordParasMap)
+                }
                 _uiState.value = current.copy(
                     content = savedContent,
                     isSaving = false,
                     isEditing = false,
                     message = "Saved changes.",
-                    wordLayoutPages = savedLayoutPages
+                    wordLayoutPages = savedLayoutPages,
+                    editedWordParagraphs = editedWordParasMap
                 )
             }.onFailure { error ->
                 _uiState.value = current.copy(
@@ -441,28 +475,24 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 findMatches(text, query, pageIndex = 0)
             }
             is DocumentContent.WordDocumentContent -> {
-                if (state.isEditing) {
-                    findMatches(state.editedText, query, pageIndex = 0)
-                } else {
-                    val matches = mutableListOf<SearchMatch>()
-                    state.wordLayoutPages.forEachIndexed { pageIdx, page ->
-                        val pageText = extractPageText(page)
-                        var start = 0
-                        while (true) {
-                            val index = pageText.indexOf(query, startIndex = start, ignoreCase = true)
-                            if (index < 0) break
-                            val previewStart = (index - 36).coerceAtLeast(0)
-                            val previewEnd = (index + query.length + 36).coerceAtMost(pageText.length)
-                            matches += SearchMatch(
-                                index = index,
-                                preview = pageText.substring(previewStart, previewEnd).replace('\n', ' '),
-                                pageIndex = pageIdx
-                            )
-                            start = index + query.length
-                        }
+                val matches = mutableListOf<SearchMatch>()
+                state.wordLayoutPages.forEachIndexed { pageIdx, page ->
+                    val pageText = extractPageText(page)
+                    var start = 0
+                    while (true) {
+                        val index = pageText.indexOf(query, startIndex = start, ignoreCase = true)
+                        if (index < 0) break
+                        val previewStart = (index - 36).coerceAtLeast(0)
+                        val previewEnd = (index + query.length + 36).coerceAtMost(pageText.length)
+                        matches += SearchMatch(
+                            index = index,
+                            preview = pageText.substring(previewStart, previewEnd).replace('\n', ' '),
+                            pageIndex = pageIdx
+                        )
+                        start = index + query.length
                     }
-                    matches
                 }
+                matches
             }
             is DocumentContent.UnsupportedContent -> findMatches(content.message, query, pageIndex = 0)
         }
@@ -542,5 +572,71 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
 
     private fun extractPageText(page: LayoutPage): String {
         return page.elements.joinToString("") { extractTextFromElement(it) }
+    }
+
+    private fun collectParagraphsFromElements(elements: List<DocxElement>, map: MutableMap<Int, String>) {
+        for (element in elements) {
+            when (element) {
+                is DocxElement.Paragraph -> {
+                    val p = element.para
+                    if (p.originalIndex != -1) {
+                        map[p.originalIndex] = p.spans.joinToString("") { it.text }
+                    }
+                }
+                is DocxElement.Table -> {
+                    for (row in element.table.rows) {
+                        for (cell in row.cells) {
+                            collectParagraphsFromElements(cell.elements, map)
+                        }
+                    }
+                }
+                is DocxElement.Image -> {}
+            }
+        }
+    }
+
+    private fun updateElementsWithEdits(
+        elements: List<DocxElement>,
+        edits: Map<Int, String>
+    ): List<DocxElement> {
+        return elements.map { element ->
+            when (element) {
+                is DocxElement.Paragraph -> {
+                    val p = element.para
+                    if (p.originalIndex != -1 && edits.containsKey(p.originalIndex)) {
+                        val newText = edits[p.originalIndex] ?: ""
+                        val originalText = p.spans.joinToString("") { it.text }
+                        if (newText != originalText) {
+                            DocxElement.Paragraph(updateParagraphSpans(p, newText))
+                        } else {
+                            element
+                        }
+                    } else {
+                        element
+                    }
+                }
+                is DocxElement.Table -> {
+                    val updatedRows = element.table.rows.map { row ->
+                        val updatedCells = row.cells.map { cell ->
+                            val updatedCellElements = updateElementsWithEdits(cell.elements, edits)
+                            cell.copy(elements = updatedCellElements)
+                        }
+                        row.copy(cells = updatedCells)
+                    }
+                    DocxElement.Table(element.table.copy(rows = updatedRows))
+                }
+                is DocxElement.Image -> element
+            }
+        }
+    }
+
+    private fun updateParagraphSpans(para: DocxParagraph, newText: String): DocxParagraph {
+        val firstSpan = para.spans.firstOrNull()
+        val newSpans = if (firstSpan != null) {
+            listOf(firstSpan.copy(text = newText))
+        } else {
+            listOf(DocxSpan(text = newText))
+        }
+        return para.copy(spans = newSpans)
     }
 }

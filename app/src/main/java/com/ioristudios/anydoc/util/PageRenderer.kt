@@ -17,7 +17,8 @@ object PageRenderer {
         filePath: String,
         searchQuery: String = "",
         activeMatchIndex: Int = -1,
-        matchesBeforePage: Int = 0
+        matchesBeforePage: Int = 0,
+        hideParagraphText: Boolean = false
     ): Bitmap {
         val config = page.config
         val scale = config.scaleFactor
@@ -37,7 +38,7 @@ object PageRenderer {
         canvas.translate(config.marginLeftPoints * scale, config.marginTopPoints * scale)
 
         for (element in page.elements) {
-            renderElement(canvas, element, filePath, scale, searchQuery, activeMatchIndex, currentMatchesCount)
+            renderElement(canvas, element, filePath, scale, searchQuery, activeMatchIndex, currentMatchesCount, hideParagraphText)
             currentMatchesCount += countMatchesInElement(element, searchQuery)
         }
 
@@ -52,17 +53,18 @@ object PageRenderer {
         scale: Float,
         searchQuery: String,
         activeMatchIndex: Int,
-        matchesBeforeElement: Int
+        matchesBeforeElement: Int,
+        hideParagraphText: Boolean
     ) {
         when (element) {
             is PositionedElement.Paragraph -> {
-                renderParagraph(canvas, element, scale, searchQuery, activeMatchIndex, matchesBeforeElement)
+                renderParagraph(canvas, element, scale, searchQuery, activeMatchIndex, matchesBeforeElement, hideParagraphText)
             }
             is PositionedElement.Image -> {
                 renderImage(canvas, element, filePath, scale)
             }
             is PositionedElement.Table -> {
-                renderTable(canvas, element, filePath, scale, searchQuery, activeMatchIndex, matchesBeforeElement)
+                renderTable(canvas, element, filePath, scale, searchQuery, activeMatchIndex, matchesBeforeElement, hideParagraphText)
             }
         }
     }
@@ -73,7 +75,8 @@ object PageRenderer {
         scale: Float,
         searchQuery: String,
         activeMatchIndex: Int,
-        matchesBeforeElement: Int
+        matchesBeforeElement: Int,
+        hideParagraphText: Boolean
     ) {
         val para = element.para
         val spannable = LayoutMetrics.buildSpannable(para, scale, searchQuery, activeMatchIndex, matchesBeforeElement)
@@ -109,7 +112,9 @@ object PageRenderer {
             canvas.drawText(bulletText, -14f * scale, layout.getLineBaseline(0).toFloat(), bulletPaint)
         }
 
-        layout.draw(canvas)
+        if (!hideParagraphText) {
+            layout.draw(canvas)
+        }
         canvas.restore()
     }
 
@@ -171,7 +176,8 @@ object PageRenderer {
         scale: Float,
         searchQuery: String,
         activeMatchIndex: Int,
-        matchesBeforeTable: Int
+        matchesBeforeTable: Int,
+        hideParagraphText: Boolean
     ) {
         canvas.save()
         canvas.translate(element.x * scale, element.y * scale)
@@ -192,7 +198,7 @@ object PageRenderer {
             val rowHeight = rowHeights.getOrNull(rowIndex) ?: 20f
             var currentX = 0f
 
-            row.cells.forEachIndexed { cellIndex, cell ->
+            row.cells.forEachIndexed { cellIndex, _ ->
                 val cellWidth = cellWidths.getOrNull(cellIndex) ?: 80f
                 val cellRect = RectF(
                     currentX * scale,
@@ -217,7 +223,7 @@ object PageRenderer {
                 canvas.translate(currentX * scale, currentY * scale)
 
                 for (subElement in cellContent) {
-                    renderElement(canvas, subElement, filePath, scale, searchQuery, activeMatchIndex, currentMatchesCount)
+                    renderElement(canvas, subElement, filePath, scale, searchQuery, activeMatchIndex, currentMatchesCount, hideParagraphText)
                     currentMatchesCount += countMatchesInElement(subElement, searchQuery)
                 }
 

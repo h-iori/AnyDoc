@@ -46,14 +46,15 @@ object DocxParser {
                     ?: xmlDoc.getElementsByTagName("w:body").item(0)
                     ?: error("Document body not found")
 
+                val counter = ParagraphIndexCounter()
                 val children = body.childNodes
                 for (i in 0 until children.length) {
                     val child = children.item(i)
                     val nodeName = child.localName ?: child.nodeName.substringAfter(':')
                     when (nodeName) {
-                        "p" -> parseParagraphNode(child, relsMap, elements)
+                        "p" -> parseParagraphNode(child, relsMap, elements, counter)
                         "tbl" -> {
-                            val tbl = parseTableNode(child, relsMap)
+                            val tbl = parseTableNode(child, relsMap, counter)
                             if (tbl != null) {
                                 elements.add(DocxElement.Table(tbl))
                             }
@@ -216,7 +217,13 @@ object DocxParser {
         return DocumentContent.WordDocumentContent(elements, plainText)
     }
 
-    private fun parseParagraphNode(pNode: Node, relsMap: Map<String, String>, outList: MutableList<DocxElement>) {
+    private fun parseParagraphNode(
+        pNode: Node,
+        relsMap: Map<String, String>,
+        outList: MutableList<DocxElement>,
+        counter: ParagraphIndexCounter
+    ) {
+        val paragraphIndex = counter.getAndIncrement()
         val spans = mutableListOf<DocxSpan>()
         var style = DocxParagraphStyle.Body
         var isPageBreak = false
@@ -363,7 +370,8 @@ object DocxParser {
                                                     spacingAfterTwips = spacingAfterTwips,
                                                     lineSpacingTwips = lineSpacingTwips,
                                                     listLevel = listLevel,
-                                                    isNumbered = isNumbered
+                                                    isNumbered = isNumbered,
+                                                    originalIndex = paragraphIndex
                                                 )))
                                                 spans.clear()
                                                 isPageBreak = false
@@ -396,14 +404,28 @@ object DocxParser {
                 spacingAfterTwips = spacingAfterTwips,
                 lineSpacingTwips = lineSpacingTwips,
                 listLevel = listLevel,
-                isNumbered = isNumbered
+                isNumbered = isNumbered,
+                originalIndex = paragraphIndex
             )))
-        } else if (isPageBreak) {
-            outList.add(DocxElement.Paragraph(DocxParagraph(emptyList(), style, isPageBreak = true)))
+        } else {
+            outList.add(DocxElement.Paragraph(DocxParagraph(
+                spans = emptyList(),
+                style = style,
+                isPageBreak = isPageBreak,
+                alignment = alignment,
+                indentStartTwips = indentStartTwips,
+                hangingTwips = hangingTwips,
+                spacingBeforeTwips = spacingBeforeTwips,
+                spacingAfterTwips = spacingAfterTwips,
+                lineSpacingTwips = lineSpacingTwips,
+                listLevel = listLevel,
+                isNumbered = isNumbered,
+                originalIndex = paragraphIndex
+            )))
         }
     }
 
-    private fun parseTableNode(tblNode: Node, relsMap: Map<String, String>): DocxTable? {
+    private fun parseTableNode(tblNode: Node, relsMap: Map<String, String>, counter: ParagraphIndexCounter): DocxTable? {
         val rows = mutableListOf<DocxTableRow>()
         var tableWidthTwips: Int? = null
         val children = tblNode.childNodes
@@ -443,9 +465,9 @@ object DocxParser {
                                         }
                                     }
                                 }
-                                "p" -> parseParagraphNode(tcChild, relsMap, cellElements)
+                                "p" -> parseParagraphNode(tcChild, relsMap, cellElements, counter)
                                 "tbl" -> {
-                                    val innerTable = parseTableNode(tcChild, relsMap)
+                                    val innerTable = parseTableNode(tcChild, relsMap, counter)
                                     if (innerTable != null) {
                                         cellElements.add(DocxElement.Table(innerTable))
                                     }
@@ -460,6 +482,11 @@ object DocxParser {
         }
         if (rows.isEmpty()) return null
         return DocxTable(rows, tableWidthTwips)
+    }
+
+    class ParagraphIndexCounter {
+        var count = 0
+        fun getAndIncrement(): Int = count++
     }
 
     private fun findBlipNode(node: Node): Node? {
