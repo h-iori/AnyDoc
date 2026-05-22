@@ -730,6 +730,8 @@ private val TOP_BAR_HEIGHT: Dp = 64.dp   // standard M3 TopAppBar height
 private object WordUi {
     val WordBlue = Color(0xFF185ABD)
     val WordBluePressed = Color(0xFF0F4C9E)
+    val WordBlueSubtle = Color(0xFFE2EAF6)
+    val WordBlueLight = Color(0xFF6398E1)
     val WordCanvasGray = Color(0xFFF3F2F1)
     val WordPageWhite = Color.White
     val WordTextBlack = Color(0xFF1F1F1F)
@@ -1968,7 +1970,7 @@ private fun WordFullscreenViewer(
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onExitEdit() }) {
-                            Icon(Icons.Default.Close, contentDescription = "Cancel", tint = AppColors.BrandStrong)
+                            Icon(Icons.Default.Close, contentDescription = "Cancel", tint = WordUi.WordBlueLight)
                         }
                     },
                     actions = {
@@ -1977,9 +1979,9 @@ private fun WordFullscreenViewer(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black.copy(alpha = 0.88f),
+                        containerColor = WordUi.WordBluePressed.copy(alpha = 0.95f),
                         titleContentColor = Color.White,
-                        navigationIconContentColor = AppColors.BrandStrong,
+                        navigationIconContentColor = Color.White,
                         actionIconContentColor = Color.White
                     )
                 )
@@ -1997,7 +1999,7 @@ private fun WordFullscreenViewer(
                                 disabledContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
-                                cursorColor = AppColors.BrandStrong
+                                cursorColor = WordUi.WordBlueLight
                             ),
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = Color.White),
                             modifier = Modifier.fillMaxWidth()
@@ -2005,7 +2007,7 @@ private fun WordFullscreenViewer(
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onSearchClose() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search", tint = AppColors.BrandStrong)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Close search", tint = WordUi.WordBlueLight)
                         }
                     },
                     actions = {
@@ -2041,9 +2043,9 @@ private fun WordFullscreenViewer(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black.copy(alpha = 0.92f),
+                        containerColor = WordUi.WordBluePressed.copy(alpha = 0.95f),
                         titleContentColor = Color.White,
-                        navigationIconContentColor = AppColors.BrandStrong,
+                        navigationIconContentColor = Color.White,
                         actionIconContentColor = Color.White
                     )
                 )
@@ -2073,7 +2075,7 @@ private fun WordFullscreenViewer(
                     },
                     navigationIcon = {
                         IconButton(onClick = { haptics.performHapticFeedback(); onBack() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AppColors.BrandStrong)
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = WordUi.WordBlueLight)
                         }
                     },
                     actions = {
@@ -2082,9 +2084,9 @@ private fun WordFullscreenViewer(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black.copy(alpha = 0.88f),
+                        containerColor = WordUi.WordBlue.copy(alpha = 0.95f),
                         titleContentColor = Color.White,
-                        navigationIconContentColor = AppColors.BrandStrong,
+                        navigationIconContentColor = Color.White,
                         actionIconContentColor = Color.White
                     )
                 )
@@ -2279,12 +2281,12 @@ private fun WordFloatingEditButton(
         FloatingActionButton(
             onClick = onClick,
             shape = CircleShape,
-            containerColor = NeonPurpleSubtle,
-            contentColor = AppColors.BrandStrong,
+            containerColor = WordUi.WordBlueSubtle,
+            contentColor = WordUi.WordBlue,
             modifier = Modifier
                 .size(58.dp)
-                .neonGlow(color = AppColors.BrandStrong, radius = 12.dp, shape = CircleShape)
-                .border(1.5.dp, AppColors.BrandStrong, CircleShape)
+                .neonGlow(color = WordUi.WordBlue, radius = 12.dp, shape = CircleShape)
+                .border(1.5.dp, WordUi.WordBlue, CircleShape)
         ) {
             Icon(Icons.Default.Edit, contentDescription = "Edit Word document")
         }
