@@ -51,7 +51,7 @@ object SlideRenderer {
         background: SlideBackground,
         width: Float,
         height: Float,
-        scale: Float
+        @Suppress("UNUSED_PARAMETER") scale: Float
     ) {
         val bounds = RectF(0f, 0f, width, height)
         when (background) {
@@ -337,7 +337,7 @@ object SlideRenderer {
                 .setLineSpacing(0f, para.lineSpacing)
             
             if (para.alignment == SlideTextAlign.JUSTIFY) {
-                builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
+                builder.setJustificationMode(android.graphics.text.LineBreaker.JUSTIFICATION_MODE_INTER_WORD)
             }
             builder.build()
         }
@@ -504,7 +504,7 @@ object SlideRenderer {
         }
     }
 
-    private fun getPaintForFill(fill: SlideFill, bounds: RectF, scale: Float): Paint? {
+    private fun getPaintForFill(fill: SlideFill, bounds: RectF, @Suppress("UNUSED_PARAMETER") scale: Float): Paint? {
         return when (fill) {
             is SlideFill.Solid -> Paint().apply {
                 color = fill.color.toInt()

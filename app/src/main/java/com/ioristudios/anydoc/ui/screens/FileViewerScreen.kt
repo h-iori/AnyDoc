@@ -158,6 +158,17 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 
 private data class FlatParagraph(
     val para: DocxParagraph,
@@ -296,6 +307,7 @@ private fun Bitmap.withAccurateHighlights(
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("UNUSED_VARIABLE")
 @Composable
 fun FileViewerScreen(
     filePath: String,
@@ -345,6 +357,23 @@ fun FileViewerScreen(
 
     LaunchedEffect(filePath) {
         viewModel.open(filePath)
+    }
+
+    if (state is DocumentViewerState.PasswordRequired) {
+        val current = state as DocumentViewerState.PasswordRequired
+        PasswordPromptScreen(
+            request = current.request,
+            wrongPasswordAttempted = current.wrongPasswordAttempted,
+            onUnlock = { password -> viewModel.unlock(password) },
+            onCancel = {
+                if (isExternal) {
+                    (context as? Activity)?.finishAndRemoveTask()
+                } else {
+                    onBack()
+                }
+            }
+        )
+        return
     }
 
     LaunchedEffect((state as? DocumentViewerState.Ready)?.message) {
@@ -760,6 +789,7 @@ fun FileViewerScreen(
                 is DocumentViewerState.Error -> {
                     ErrorContent(current, Modifier.padding(paddingValues))
                 }
+                is DocumentViewerState.PasswordRequired -> {}
                 is DocumentViewerState.Ready -> {
                     val searchQuery = if (isSearching) current.searchQuery else ""
                     val activeMatch = current.activeMatch
@@ -836,6 +866,7 @@ private object WordUi {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("UNUSED_VARIABLE")
 @Composable
 private fun PdfFullscreenViewer(
     state: DocumentViewerState.Ready,
@@ -2667,4 +2698,207 @@ private fun countOccurrences(text: String, query: String): Int {
         start = i + query.length
     }
     return count
+}
+
+@Suppress("UNUSED_VARIABLE")
+@Composable
+fun PasswordPromptScreen(
+    request: DocumentOpenRequest,
+    wrongPasswordAttempted: Boolean,
+    onUnlock: (String) -> Unit,
+    onCancel: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val spacing = rememberAppSpacing()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF050510),
+                        Color(0xFF0A0A0F),
+                        Color(0xFF0D0D1A)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .widthIn(max = 420.dp)
+                .neonGlow(color = AppColors.Brand.copy(alpha = 0.3f), radius = 16.dp)
+                .border(
+                    width = 1.5.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            AppColors.Brand.copy(alpha = 0.6f),
+                            AppColors.BrandStrong.copy(alpha = 0.2f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(20.dp)
+                ),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = AppColors.SurfaceElevated.copy(alpha = 0.85f)
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                // Glow Lock Icon
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .background(
+                            color = NeonPurpleSubtle,
+                            shape = CircleShape
+                        )
+                        .border(1.5.dp, AppColors.BrandStrong, CircleShape)
+                        .neonGlow(color = AppColors.BrandStrong, radius = 8.dp, shape = CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Lock,
+                        contentDescription = "Encrypted",
+                        tint = AppColors.BrandStrong,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // Typography
+                Text(
+                    text = "Decrypt Document",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Text(
+                    text = "Enter the password to unlock and view\n\"${request.displayName}\"",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Input Field
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (password.isNotEmpty()) {
+                                onUnlock(password)
+                            }
+                        }
+                    ),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    },
+                    trailingIcon = {
+                        val image = if (passwordVisible) {
+                            androidx.compose.material.icons.Icons.Filled.Visibility
+                        } else {
+                            androidx.compose.material.icons.Icons.Filled.VisibilityOff
+                        }
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = image,
+                                contentDescription = if (passwordVisible) "Hide password" else "Show password",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AppColors.BrandStrong,
+                        unfocusedBorderColor = AppColors.BorderSubtle,
+                        focusedLabelColor = AppColors.BrandStrong,
+                        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        cursorColor = AppColors.BrandStrong
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Error message
+                if (wrongPasswordAttempted) {
+                    Text(
+                        text = "Incorrect password. Please try again.",
+                        color = AppColors.Danger,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)
+                ) {
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Cancel",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Button(
+                        onClick = { onUnlock(password) },
+                        enabled = password.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AppColors.Brand,
+                            contentColor = Color.White,
+                            disabledContainerColor = AppColors.SurfaceHighest,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (password.isNotEmpty()) {
+                                    Modifier
+                                        .neonGlow(color = AppColors.Brand, radius = 10.dp)
+                                        .border(1.dp, AppColors.BrandStrong, RoundedCornerShape(12.dp))
+                                } else {
+                                    Modifier
+                                }
+                            )
+                    ) {
+                        Text(
+                            text = "Unlock",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

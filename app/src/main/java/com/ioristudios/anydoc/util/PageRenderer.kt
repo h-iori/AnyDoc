@@ -89,7 +89,7 @@ object PageRenderer {
             .setIncludePad(false)
 
         if (para.alignment == DocxTextAlignment.Justify) {
-            builder.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
+            builder.setJustificationMode(android.graphics.text.LineBreaker.JUSTIFICATION_MODE_INTER_WORD)
         }
         val layout = builder.build()
 

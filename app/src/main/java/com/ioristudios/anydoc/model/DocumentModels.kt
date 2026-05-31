@@ -193,6 +193,10 @@ sealed class DocxElement {
 
 sealed class DocumentViewerState {
     object Loading : DocumentViewerState()
+    data class PasswordRequired(
+        val request: DocumentOpenRequest,
+        val wrongPasswordAttempted: Boolean = false
+    ) : DocumentViewerState()
     data class Ready(
         val request: DocumentOpenRequest,
         val content: DocumentContent,

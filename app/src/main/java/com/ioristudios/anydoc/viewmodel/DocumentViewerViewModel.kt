@@ -19,6 +19,9 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private val _uiState = MutableStateFlow<DocumentViewerState>(DocumentViewerState.Loading)
     private var pdfPageDataList: List<PdfTextPositionExtractor.Companion.PageTextData> = emptyList()
     private var slideshowJob: kotlinx.coroutines.Job? = null
+    private var documentPassword: String? = null
+    private var originalFilePath: String? = null
+    private var decryptedTempFile: File? = null
     val uiState: StateFlow<DocumentViewerState> = _uiState.asStateFlow()
 
     init {
@@ -40,6 +43,12 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch(Dispatchers.IO) {
             slideshowJob?.cancel()
             _uiState.value = DocumentViewerState.Loading
+
+            // Clean up previous decrypted file and state
+            decryptedTempFile?.delete()
+            decryptedTempFile = null
+            documentPassword = null
+            originalFilePath = null
 
             var targetPath = pathOrUri
             var originalUriString: String? = null
@@ -96,76 +105,132 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 return@launch
             }
 
+            originalFilePath = targetPath
+
             runCatching {
                 val request = DocumentTypeDetector.detect(targetPath, originalUriString)
-                var parsedPresentation: PresentationContent? = null
-                val content = when (request.kind) {
-                    DocumentKind.Pdf -> {
-                        val pageData = PdfTextPositionExtractor.extractPageData(targetPath)
-                        pdfPageDataList = pageData
-                        val pageTexts = pageData.map { it.text }
-                        DocumentContent.PdfContent(request.path, pageTexts)
-                    }
-                    DocumentKind.Text -> DocumentContent.TextContent(
-                        text = DocumentFileIo.readText(request.path),
-                        isCodeLike = request.extension != "txt" && request.extension != "log"
-                    )
-                    DocumentKind.Markdown -> DocumentContent.TextContent(
-                        text = DocumentFileIo.readText(request.path),
-                        isCodeLike = false
-                    )
-                    DocumentKind.Csv -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(request.path))
-                    DocumentKind.Word -> when (request.extension) {
-                        "docx" -> DocxParser.parseDocx(request.path)
-                        "doc" -> DocxParser.parseDoc(request.path)
-                        "rtf" -> DocxParser.parseRtf(request.path)
-                        else -> DocumentContent.UnsupportedContent("Unsupported Word format.")
-                    }
-                    DocumentKind.Spreadsheet -> when (request.extension) {
-                        "xlsx" -> XlsxParser.parse(request.path)
-                        "xls" -> XlsxParser.parseXls(request.path)
-                        else -> DocumentContent.UnsupportedContent("Unsupported spreadsheet format.")
-                    }
-                    DocumentKind.Presentation -> when (request.extension) {
-                        "pptx", "ppt" -> {
-                            parsedPresentation = kotlinx.coroutines.withTimeout(8000L) {
-                                if (request.extension == "pptx") {
-                                    PptxParser.parsePptx(request.path)
-                                } else {
-                                    PptxParser.parsePpt(request.path)
-                                }
-                            }
-                            DocumentContent.PresentationFileContent(request.path, request.extension)
-                        }
-                        else -> DocumentContent.UnsupportedContent("Unsupported presentation format.")
-                    }
-                    DocumentKind.Unsupported -> DocumentContent.UnsupportedContent("This file type is not supported by AnyDoc yet.")
-                }
-                val wordLayoutPages = if (content is DocumentContent.WordDocumentContent) {
-                    MeasurementLayoutEngine().layoutDocument(content.elements, LayoutConfig())
+                
+                // Check if password protected
+                if (DocumentDecryptor.isPasswordProtected(file, request.extension)) {
+                    _uiState.value = DocumentViewerState.PasswordRequired(request)
                 } else {
-                    emptyList()
+                    openWithRequest(request)
                 }
-                val editedWordParasMap = mutableMapOf<Int, String>()
-                if (content is DocumentContent.WordDocumentContent) {
-                    collectParagraphsFromElements(content.elements, editedWordParasMap)
-                }
-                DocumentViewerState.Ready(
-                    request = request,
-                    content = content,
-                    editedText = initialEditableText(content),
-                    editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
-                    wordLayoutPages = wordLayoutPages,
-                    editedWordParagraphs = editedWordParasMap,
-                    activeSheetIndex = 0,
-                    presentationState = PresentationUiState(
-                        parsedContent = parsedPresentation
-                    )
-                )
-            }.onSuccess { ready ->
-                _uiState.value = ready
             }.onFailure { error ->
                 _uiState.value = DocumentViewerState.Error(displayName ?: file.name, error.localizedMessage ?: "Could not open document.")
+            }
+        }
+    }
+
+    private fun openWithRequest(request: DocumentOpenRequest) {
+        val password = documentPassword
+        if (password != null) {
+            org.apache.poi.hssf.record.crypto.Biff8EncryptionKey.setCurrentUserPassword(password)
+        }
+        
+        try {
+            var parsedPresentation: PresentationContent? = null
+            val content = when (request.kind) {
+                DocumentKind.Pdf -> {
+                    val pageData = PdfTextPositionExtractor.extractPageData(request.path)
+                    pdfPageDataList = pageData
+                    val pageTexts = pageData.map { it.text }
+                    DocumentContent.PdfContent(request.path, pageTexts)
+                }
+                DocumentKind.Text -> DocumentContent.TextContent(
+                    text = DocumentFileIo.readText(request.path),
+                    isCodeLike = request.extension != "txt" && request.extension != "log"
+                )
+                DocumentKind.Markdown -> DocumentContent.TextContent(
+                    text = DocumentFileIo.readText(request.path),
+                    isCodeLike = false
+                )
+                DocumentKind.Csv -> XlsxParser.csvToSpreadsheet(DocumentFileIo.readCsv(request.path))
+                DocumentKind.Word -> when (request.extension) {
+                    "docx" -> DocxParser.parseDocx(request.path)
+                    "doc" -> DocxParser.parseDoc(request.path)
+                    "rtf" -> DocxParser.parseRtf(request.path)
+                    else -> DocumentContent.UnsupportedContent("Unsupported Word format.")
+                }
+                DocumentKind.Spreadsheet -> when (request.extension) {
+                    "xlsx" -> XlsxParser.parse(request.path)
+                    "xls" -> XlsxParser.parseXls(request.path)
+                    else -> DocumentContent.UnsupportedContent("Unsupported spreadsheet format.")
+                }
+                DocumentKind.Presentation -> when (request.extension) {
+                    "pptx", "ppt" -> {
+                        parsedPresentation = runCatching {
+                            if (request.extension == "pptx") {
+                                PptxParser.parsePptx(request.path)
+                            } else {
+                                PptxParser.parsePpt(request.path)
+                            }
+                        }.getOrThrow()
+                        DocumentContent.PresentationFileContent(request.path, request.extension)
+                    }
+                    else -> DocumentContent.UnsupportedContent("Unsupported presentation format.")
+                }
+                DocumentKind.Unsupported -> DocumentContent.UnsupportedContent("This file type is not supported by AnyDoc yet.")
+            }
+            val wordLayoutPages = if (content is DocumentContent.WordDocumentContent) {
+                MeasurementLayoutEngine().layoutDocument(content.elements, LayoutConfig())
+            } else {
+                emptyList()
+            }
+            val editedWordParasMap = mutableMapOf<Int, String>()
+            if (content is DocumentContent.WordDocumentContent) {
+                collectParagraphsFromElements(content.elements, editedWordParasMap)
+            }
+            _uiState.value = DocumentViewerState.Ready(
+                request = request,
+                content = content,
+                editedText = initialEditableText(content),
+                editedRows = (content as? DocumentContent.CsvContent)?.rows.orEmpty(),
+                wordLayoutPages = wordLayoutPages,
+                editedWordParagraphs = editedWordParasMap,
+                activeSheetIndex = 0,
+                presentationState = PresentationUiState(
+                    parsedContent = parsedPresentation
+                )
+            )
+        } catch (error: Throwable) {
+            _uiState.value = DocumentViewerState.Error(
+                request.displayName,
+                error.localizedMessage ?: "Could not open document."
+            )
+        } finally {
+            org.apache.poi.hssf.record.crypto.Biff8EncryptionKey.setCurrentUserPassword(null)
+        }
+    }
+
+    fun unlock(password: String) {
+        val current = _uiState.value
+        val request = when (current) {
+            is DocumentViewerState.PasswordRequired -> current.request
+            else -> return
+        }
+
+        _uiState.value = DocumentViewerState.PasswordRequired(request, wrongPasswordAttempted = false)
+        
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = File(originalFilePath ?: request.path)
+            val extension = request.extension.lowercase()
+            val tempFile = File(context.cacheDir, "decrypted_${System.currentTimeMillis()}_${file.name}")
+            
+            val decryptedSuccessfully = DocumentDecryptor.decryptFile(file, extension, password, tempFile)
+            if (decryptedSuccessfully) {
+                documentPassword = password
+                if (extension in listOf("pdf", "docx", "xlsx", "pptx")) {
+                    decryptedTempFile = tempFile
+                    val updatedRequest = request.copy(path = tempFile.absolutePath)
+                    openWithRequest(updatedRequest)
+                } else {
+                    tempFile.delete()
+                    openWithRequest(request)
+                }
+            } else {
+                tempFile.delete()
+                _uiState.value = DocumentViewerState.PasswordRequired(request, wrongPasswordAttempted = true)
             }
         }
     }
@@ -427,59 +492,103 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch(Dispatchers.IO) {
             val localPath = current.request.path
             val result = runCatching {
-                when {
-                    current.request.extension == "csv" && current.content is DocumentContent.SpreadsheetContent -> {
-                        // Convert SpreadsheetContent back to CSV rows for saving
-                        val sheet = current.content.sheets.getOrNull(current.activeSheetIndex)
-                        if (sheet != null) {
-                            val csvRows = (0 until sheet.rowCount).map { rowIdx ->
-                                val row = sheet.rows.find { it.rowIndex == rowIdx }
-                                (0 until sheet.columnCount).map { colIdx ->
-                                    val editKey = "${current.activeSheetIndex}:$rowIdx:$colIdx"
-                                    current.editedCells[editKey] ?: row?.cells?.get(colIdx)?.value ?: ""
+                val password = documentPassword
+                if (password != null) {
+                    org.apache.poi.hssf.record.crypto.Biff8EncryptionKey.setCurrentUserPassword(password)
+                }
+                
+                try {
+                    when {
+                        current.request.extension == "csv" && current.content is DocumentContent.SpreadsheetContent -> {
+                            // Convert SpreadsheetContent back to CSV rows for saving
+                            val sheet = current.content.sheets.getOrNull(current.activeSheetIndex)
+                            if (sheet != null) {
+                                val csvRows = (0 until sheet.rowCount).map { rowIdx ->
+                                    val row = sheet.rows.find { it.rowIndex == rowIdx }
+                                    (0 until sheet.columnCount).map { colIdx ->
+                                        val editKey = "${current.activeSheetIndex}:$rowIdx:$colIdx"
+                                        current.editedCells[editKey] ?: row?.cells?.get(colIdx)?.value ?: ""
+                                    }
                                 }
+                                DocumentFileIo.writeCsv(localPath, csvRows)
                             }
-                            DocumentFileIo.writeCsv(localPath, csvRows)
                         }
+                        (current.request.extension == "xlsx" || current.request.extension == "xls") && current.content is DocumentContent.SpreadsheetContent -> {
+                            val sheetEditedCells = current.editedCells.filter { (key, _) ->
+                                key.startsWith("${current.activeSheetIndex}:")
+                            }.mapKeys { (key, _) ->
+                                key.substringAfter(":")
+                            }
+                            val file = File(localPath)
+                            val isZip = file.exists() && file.length() >= 4 && file.inputStream().use { fis ->
+                                val b = ByteArray(2)
+                                fis.read(b) == 2 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte()
+                            }
+                            if (isZip) {
+                                DocumentFileIo.writeXlsxSheet(
+                                    localPath,
+                                    current.activeSheetIndex,
+                                    sheetEditedCells,
+                                    current.content
+                                )
+                            } else {
+                                DocumentFileIo.writeXlsSheet(
+                                    localPath,
+                                    current.activeSheetIndex,
+                                    sheetEditedCells
+                                )
+                            }
+                        }
+                        current.request.extension == "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
+                        current.request.extension == "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
+                        current.request.extension == "docx" -> DocumentFileIo.writeDocxInPlace(localPath, current.editedWordParagraphs)
+                        else -> DocumentFileIo.writeText(localPath, current.editedText)
                     }
-                    (current.request.extension == "xlsx" || current.request.extension == "xls") && current.content is DocumentContent.SpreadsheetContent -> {
-                        val sheetEditedCells = current.editedCells.filter { (key, _) ->
-                            key.startsWith("${current.activeSheetIndex}:")
-                        }.mapKeys { (key, _) ->
-                            key.substringAfter(":")
-                        }
-                        val file = File(localPath)
-                        val isZip = file.exists() && file.length() >= 4 && file.inputStream().use { fis ->
-                            val b = ByteArray(2)
-                            fis.read(b) == 2 && b[0] == 0x50.toByte() && b[1] == 0x4B.toByte()
-                        }
-                        if (isZip) {
-                            DocumentFileIo.writeXlsxSheet(
-                                localPath,
-                                current.activeSheetIndex,
-                                sheetEditedCells,
-                                current.content
-                            )
-                        } else {
-                            DocumentFileIo.writeXlsSheet(
-                                localPath,
-                                current.activeSheetIndex,
-                                sheetEditedCells
-                            )
-                        }
-                    }
-                    current.request.extension == "csv" -> DocumentFileIo.writeCsv(localPath, current.editedRows)
-                    current.request.extension == "xlsx" -> DocumentFileIo.writeXlsxRows(localPath, current.editedRows)
-                    current.request.extension == "docx" -> DocumentFileIo.writeDocxInPlace(localPath, current.editedWordParagraphs)
-                    else -> DocumentFileIo.writeText(localPath, current.editedText)
+                } finally {
+                    org.apache.poi.hssf.record.crypto.Biff8EncryptionKey.setCurrentUserPassword(null)
                 }
 
+                // Copy back to original encrypted file/URI
+                val origPath = originalFilePath
                 val originalUri = current.request.originalUri
-                if (!originalUri.isNullOrBlank() && localPath.startsWith(context.cacheDir.absolutePath)) {
-                    val uri = Uri.parse(originalUri)
-                    context.contentResolver.openOutputStream(uri, "rwt")?.use { outputStream ->
-                        File(localPath).inputStream().use { inputStream ->
-                            inputStream.copyTo(outputStream)
+                
+                if (password != null && origPath != null) {
+                    val isLegacy = current.request.extension.lowercase() in listOf("doc", "xls", "ppt")
+                    if (isLegacy) {
+                        // Written directly to origPath already. Copy to content URI if needed.
+                        if (!originalUri.isNullOrBlank()) {
+                            val uri = Uri.parse(originalUri)
+                            context.contentResolver.openOutputStream(uri, "rwt")?.use { outputStream ->
+                                File(localPath).inputStream().use { inputStream ->
+                                    inputStream.copyTo(outputStream)
+                                }
+                            }
+                        }
+                    } else {
+                        // Re-encrypt the temp decrypted file back into original path
+                        val encryptedTemp = File(context.cacheDir, "encrypted_${System.currentTimeMillis()}")
+                        try {
+                            DocumentDecryptor.encryptOffice(File(localPath), password, encryptedTemp)
+                            encryptedTemp.copyTo(File(origPath), overwrite = true)
+                            if (!originalUri.isNullOrBlank()) {
+                                val uri = Uri.parse(originalUri)
+                                context.contentResolver.openOutputStream(uri, "rwt")?.use { outputStream ->
+                                    encryptedTemp.inputStream().use { inputStream ->
+                                        inputStream.copyTo(outputStream)
+                                    }
+                                }
+                            }
+                        } finally {
+                            encryptedTemp.delete()
+                        }
+                    }
+                } else {
+                    if (!originalUri.isNullOrBlank() && localPath.startsWith(context.cacheDir.absolutePath)) {
+                        val uri = Uri.parse(originalUri)
+                        context.contentResolver.openOutputStream(uri, "rwt")?.use { outputStream ->
+                            File(localPath).inputStream().use { inputStream ->
+                                inputStream.copyTo(outputStream)
+                            }
                         }
                     }
                 }
@@ -973,5 +1082,6 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     override fun onCleared() {
         super.onCleared()
         slideshowJob?.cancel()
+        decryptedTempFile?.delete()
     }
 }
