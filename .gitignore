@@ -8,3 +8,4 @@ ruvector.db
 *.jks
 *.keystore
 keystore.properties
+*.apk

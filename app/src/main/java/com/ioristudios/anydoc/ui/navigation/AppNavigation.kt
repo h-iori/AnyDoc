@@ -101,13 +101,22 @@ fun AppNavigation(initialFilePath: String? = null) {
         navController.navigate("fileViewer?path=${Uri.encode(filePath)}")
     }
 
+    val isIncomingContentUri = initialFilePath?.startsWith("content://") == true
     val hasPermission = PermissionManager.hasStoragePermission(context)
-    val startDest = if (hasPermission) "home" else "permission"
+    val startDest = when {
+        !initialFilePath.isNullOrBlank() -> "fileViewer?path=${Uri.encode(initialFilePath)}&isExternal=true"
+        hasPermission -> "home"
+        else -> "permission"
+    }
 
-    LaunchedEffect(hasPermission, initialFilePath) {
-        if (hasPermission && !initialFilePath.isNullOrBlank()) {
-            navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}&isExternal=true")
-            viewModel.markFileAsOpened(initialFilePath)
+    LaunchedEffect(initialFilePath) {
+        if (!initialFilePath.isNullOrBlank()) {
+            navController.navigate("fileViewer?path=${Uri.encode(initialFilePath)}&isExternal=true") {
+                launchSingleTop = true
+            }
+            if (!isIncomingContentUri) {
+                viewModel.markFileAsOpened(initialFilePath)
+            }
         }
     }
 

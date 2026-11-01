@@ -65,28 +65,49 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                     if (resolvedPath != null && File(resolvedPath).exists()) {
                         targetPath = resolvedPath
                     } else {
-                        var name = "temp_document"
+                        var name: String? = null
                         runCatching {
-                            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                                 val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                                 if (nameIndex != -1 && cursor.moveToFirst()) {
                                     name = cursor.getString(nameIndex)
                                 }
                             }
                         }
-                        displayName = name
+                        if (name.isNullOrBlank()) {
+                            name = uri.lastPathSegment?.let { File(it).name }
+                        }
+                        val detectedMime = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+                        val extFromMime = detectedMime?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
 
-                        val tempFile = File(context.cacheDir, name)
+                        val cleanBase = if (!name.isNullOrBlank() && name!!.contains('.')) {
+                            name!!.substringBeforeLast('.')
+                        } else {
+                            name ?: "shared_document"
+                        }
+                        val finalExt = when {
+                            !name.isNullOrBlank() && name!!.contains('.') -> name!!.substringAfterLast('.')
+                            !extFromMime.isNullOrBlank() -> extFromMime
+                            else -> "txt"
+                        }
+                        val finalFileName = "${File(cleanBase).name}.$finalExt"
+                        displayName = finalFileName
+
+                        val tempDir = File(context.cacheDir, "shared_temp_docs")
+                        tempDir.mkdirs()
+                        val tempFile = File(tempDir, finalFileName)
                         val copyResult = runCatching {
-                            context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                                tempFile.outputStream().use { outputStream ->
-                                    inputStream.copyTo(outputStream)
+                            val inputStream = context.contentResolver.openInputStream(uri)
+                                ?: throw java.io.IOException("Cannot open input stream for $uri")
+                            inputStream.use { inStream ->
+                                tempFile.outputStream().use { outStream ->
+                                    inStream.copyTo(outStream)
                                 }
                             }
                         }
                         if (copyResult.isFailure) {
                             _uiState.value = DocumentViewerState.Error(
-                                name,
+                                finalFileName,
                                 "Failed to read shared document: ${copyResult.exceptionOrNull()?.localizedMessage}"
                             )
                             return@launch
@@ -585,9 +606,14 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
                 } else {
                     if (!originalUri.isNullOrBlank() && localPath.startsWith(context.cacheDir.absolutePath)) {
                         val uri = Uri.parse(originalUri)
-                        context.contentResolver.openOutputStream(uri, "rwt")?.use { outputStream ->
-                            File(localPath).inputStream().use { inputStream ->
-                                inputStream.copyTo(outputStream)
+                        runCatching {
+                            val out = runCatching { context.contentResolver.openOutputStream(uri, "wt") }.getOrNull()
+                                ?: runCatching { context.contentResolver.openOutputStream(uri, "rwt") }.getOrNull()
+                                ?: context.contentResolver.openOutputStream(uri)
+                            out?.use { outputStream ->
+                                File(localPath).inputStream().use { inputStream ->
+                                    inputStream.copyTo(outputStream)
+                                }
                             }
                         }
                     }
