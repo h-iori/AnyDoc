@@ -231,20 +231,25 @@ private fun collectFlatParagraphs(
 private val HighlightNormal = Color(0xFFFFE066)   // yellow
 private val HighlightActive = Color(0xFFFF9800)   // orange
 
-private data class PdfPageFrame(
-    val bitmap: Bitmap,
-    val widthPts: Float,
-    val heightPts: Float
-)
-
 // ─── LRU Bitmap Cache (shared across compositions) ────────────────────────────
-// Capped at 1/8th of available VM heap to avoid OOM
-private val pdfPageBitmapCache: LruCache<String, PdfPageFrame> by lazy {
+// Capped at 1/8th of available VM heap to avoid OOM, recycling evicted bitmaps into BitmapPool
+private val pdfPageBitmapCache: LruCache<String, com.ioristudios.anydoc.util.PdfPageFrame> by lazy {
     val maxMemKb = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    val cacheSize = maxMemKb / 8
-    object : LruCache<String, PdfPageFrame>(cacheSize) {
-        override fun sizeOf(key: String, value: PdfPageFrame): Int =
+    val cacheSize = (maxMemKb / 8).coerceIn(16 * 1024, 64 * 1024)
+    object : LruCache<String, com.ioristudios.anydoc.util.PdfPageFrame>(cacheSize) {
+        override fun sizeOf(key: String, value: com.ioristudios.anydoc.util.PdfPageFrame): Int =
             value.bitmap.byteCount / 1024
+
+        override fun entryRemoved(
+            evicted: Boolean,
+            key: String,
+            oldValue: com.ioristudios.anydoc.util.PdfPageFrame,
+            newValue: com.ioristudios.anydoc.util.PdfPageFrame?
+        ) {
+            if (evicted) {
+                com.ioristudios.anydoc.util.BitmapPool.release(oldValue.bitmap)
+            }
+        }
     }
 }
 
@@ -950,7 +955,7 @@ private fun PdfFullscreenViewer(
         }
     }
 
-    val totalPages = content.pageTexts.size.coerceAtLeast(1)
+    val totalPages = content.pageCount.coerceAtLeast(content.pageTexts.size).coerceAtLeast(1)
 
     // FIX #7 — Smooth scroll fraction using both index + pixel offset, mapping exactly 0f to 1f
     val scrollFraction by remember {
@@ -1176,12 +1181,13 @@ private fun PdfFullscreenViewer(
             contentPadding = PaddingValues(0.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            itemsIndexed(content.pageTexts.indices.toList().ifEmpty { listOf(0) }) { pageIndex, _ ->
+            items(count = totalPages, key = { it }) { pageIndex ->
                 val pageSearchQuery = if (isSearching) state.searchQuery else ""
 
                 PdfPageItem(
                     path = content.path,
                     pageIndex = pageIndex,
+                    defaultAspectRatio = content.defaultAspectRatio,
                     state = state,
                     searchQuery = pageSearchQuery
                 )
@@ -1460,39 +1466,25 @@ private fun PdfFullscreenViewer(
 private fun PdfPageItem(
     path: String,
     pageIndex: Int,
+    defaultAspectRatio: Float,
     state: DocumentViewerState.Ready,
     searchQuery: String
 ) {
     // AGENT 5 — LRU cache key
     val cacheKey = "$path:$pageIndex"
 
-    var pageFrame by remember(path, pageIndex) { mutableStateOf<PdfPageFrame?>(pdfPageBitmapCache.get(cacheKey)) }
+    var pageFrame by remember(path, pageIndex) { mutableStateOf<com.ioristudios.anydoc.util.PdfPageFrame?>(pdfPageBitmapCache.get(cacheKey)) }
     var error by remember(path, pageIndex) { mutableStateOf<String?>(null) }
 
-    // AGENT 5 — Render bitmap in background; check cache first
+    // AGENT 5 & AGENT 6 — Render bitmap via persistent PdfSessionManager
     LaunchedEffect(path, pageIndex) {
         if (pageFrame != null) return@LaunchedEffect   // cache hit — skip render
 
         val result = withContext(Dispatchers.IO) {
             runCatching {
-                val file = File(path)
-                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
-                    PdfRenderer(fd).use { renderer ->
-                        renderer.openPage(pageIndex).use { page ->
-                            // AGENT 5 — Adaptive quality: moderate base width, higher when zoomed
-                            val targetWidth = (page.width * 2).coerceIn(720, 1440)
-                            val renderScale = targetWidth.toFloat() / page.width.toFloat()
-                            val bmp = Bitmap.createBitmap(
-                                (page.width * renderScale).toInt(),
-                                (page.height * renderScale).toInt(),
-                                Bitmap.Config.ARGB_8888
-                            )
-                            android.graphics.Canvas(bmp).drawColor(android.graphics.Color.WHITE)
-                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                            PdfPageFrame(bmp, page.width.toFloat(), page.height.toFloat())
-                        }
-                    }
-                }
+                val targetWidth = 1080
+                com.ioristudios.anydoc.util.PdfSessionManager.instance.renderPage(pageIndex, targetWidth)
+                    ?: throw java.io.IOException("Unable to render page $pageIndex")
             }
         }
         result.onSuccess { frame ->
@@ -1505,7 +1497,7 @@ private fun PdfPageItem(
     // Recycle when removed from composition only if not in cache
     DisposableEffect(path, pageIndex) {
         onDispose {
-            // Don't recycle — let LRU cache manage lifecycle
+            // Lifecycle managed by LRU cache with eviction pool
         }
     }
 
@@ -1527,13 +1519,18 @@ private fun PdfPageItem(
         }
     }
 
+    val pageRatio = pageFrame?.let { it.widthPts / it.heightPts } ?: (1f / defaultAspectRatio.coerceAtLeast(0.5f))
+
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Issue 4 — Simple render: no per-page zoom; zoom is applied by the parent wrapper Box
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(pageRatio)
+        ) {
             when {
                 error != null -> {
                     Box(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -1545,19 +1542,20 @@ private fun PdfPageItem(
                 }
                 highlightedBitmap == null -> {
                     Box(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF1E1E1E)),
                         contentAlignment = Alignment.Center
                     ) {
                         CircularProgressIndicator(color = AppColors.BrandStrong, modifier = Modifier.size(36.dp))
                     }
                 }
                 else -> {
-                    // AGENT 4 — Display bitmap (with on-canvas highlights already baked in)
                     Image(
                         bitmap = highlightedBitmap.asImageBitmap(),
                         contentDescription = "Page ${pageIndex + 1}",
-                        modifier = Modifier.fillMaxWidth(),
-                        contentScale = ContentScale.FillWidth
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
                     )
                 }
             }
@@ -1568,7 +1566,7 @@ private fun PdfPageItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(2.dp)
-                .background(Color(0xFF1E2433))
+                .background(Color(0xFF2A2A2A))
         )
     }
 }

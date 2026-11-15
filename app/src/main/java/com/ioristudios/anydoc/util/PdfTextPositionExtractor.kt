@@ -56,6 +56,14 @@ class PdfTextPositionExtractor : PDFTextStripper() {
             val positions: List<TextPosition?>
         )
 
+        fun extractSinglePage(document: PDDocument, pageNumber1Based: Int): PageTextData {
+            val extractor = PdfTextPositionExtractor()
+            extractor.startPage = pageNumber1Based
+            extractor.endPage = pageNumber1Based
+            extractor.writeText(document, StringWriter())
+            return PageTextData(extractor.getPageText(), extractor.getPositions())
+        }
+
         fun extractPageData(path: String): List<PageTextData> {
             val file = File(path)
             if (!file.exists()) return emptyList()

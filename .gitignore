@@ -1,11 +1,62 @@
-/.gradle
-app/build
-/build
-/.swarm
-ruvector.db
+# Built application files
+*.apk
+!AnyDoc.by.Iori.Studios.apk
+*.aar
+*.ap_
+*.aab
+*.dex
+*.dm
 
-# Keystore and signing credentials
+# Java class files
+*.class
+
+# Generated build directories
+build/
+app/build/
+**/build/
+bin/
+gen/
+out/
+
+# Gradle files
+.gradle/
+.gradle-user/
+buildOutput/
+
+# Local configuration file (contains SDK path)
+local.properties
+
+# Proguard / R8 folder
+proguard/
+
+# Log files
+*.log
+
+# Android Studio & IntelliJ IDEA files
+*.iml
+.idea/
+*.iws
+
+# Kotlin compiler caches
+.kotlin/
+.kotlin-lsp/
+
+# Keystore files and signing credentials
 *.jks
 *.keystore
 keystore.properties
-*.apk
+
+# Native build folders
+.externalNativeBuild/
+.cxx/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Agent and temporary coordination files
+.agents/
+.claude/
+.claude-flow/
+.swarm/
+ruvector.db

@@ -19,6 +19,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     private val _uiState = MutableStateFlow<DocumentViewerState>(DocumentViewerState.Loading)
     private var pdfPageDataList: List<PdfTextPositionExtractor.Companion.PageTextData> = emptyList()
     private var slideshowJob: kotlinx.coroutines.Job? = null
+    private var pdfSearchJob: kotlinx.coroutines.Job? = null
     private var documentPassword: String? = null
     private var originalFilePath: String? = null
     private var decryptedTempFile: File? = null
@@ -42,6 +43,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     fun open(pathOrUri: String) {
         viewModelScope.launch(Dispatchers.IO) {
             slideshowJob?.cancel()
+            pdfSearchJob?.cancel()
             _uiState.value = DocumentViewerState.Loading
 
             // Clean up previous decrypted file and state
@@ -143,7 +145,7 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    private fun openWithRequest(request: DocumentOpenRequest) {
+    private suspend fun openWithRequest(request: DocumentOpenRequest) {
         val password = documentPassword
         if (password != null) {
             org.apache.poi.hssf.record.crypto.Biff8EncryptionKey.setCurrentUserPassword(password)
@@ -153,10 +155,15 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
             var parsedPresentation: PresentationContent? = null
             val content = when (request.kind) {
                 DocumentKind.Pdf -> {
-                    val pageData = PdfTextPositionExtractor.extractPageData(request.path)
-                    pdfPageDataList = pageData
-                    val pageTexts = pageData.map { it.text }
-                    DocumentContent.PdfContent(request.path, pageTexts)
+                    val pageCount = PdfSessionManager.instance.open(request.path)
+                    val aspectRatio = PdfSessionManager.instance.defaultAspectRatio
+                    pdfPageDataList = emptyList()
+                    DocumentContent.PdfContent(
+                        path = request.path,
+                        pageCount = pageCount,
+                        defaultAspectRatio = aspectRatio,
+                        pageTexts = emptyList()
+                    )
                 }
                 DocumentKind.Text -> DocumentContent.TextContent(
                     text = DocumentFileIo.readText(request.path),
@@ -698,11 +705,39 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
 
     fun updateSearch(query: String) {
         val current = _uiState.value as? DocumentViewerState.Ready ?: return
-        val matches = if (query.isBlank()) {
-            emptyList()
-        } else {
-            findMatchesForState(current, query)
+        pdfSearchJob?.cancel()
+
+        if (query.isBlank()) {
+            _uiState.value = current.copy(
+                searchQuery = query,
+                searchMatches = emptyList(),
+                activeMatch = -1
+            )
+            return
         }
+
+        if (current.content is DocumentContent.PdfContent) {
+            _uiState.value = current.copy(
+                searchQuery = query,
+                searchMatches = emptyList(),
+                activeMatch = -1
+            )
+            val pdfPath = current.content.path
+            pdfSearchJob = viewModelScope.launch(Dispatchers.IO) {
+                AsyncPdfSearchEngine.search(pdfPath, query).collect { matches ->
+                    val latest = _uiState.value as? DocumentViewerState.Ready ?: return@collect
+                    if (latest.searchQuery == query) {
+                        _uiState.value = latest.copy(
+                            searchMatches = matches,
+                            activeMatch = if (matches.isNotEmpty() && latest.activeMatch < 0) 0 else latest.activeMatch
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        val matches = findMatchesForState(current, query)
         _uiState.value = current.copy(
             searchQuery = query,
             searchMatches = matches,
@@ -1108,6 +1143,11 @@ class DocumentViewerViewModel(application: Application) : AndroidViewModel(appli
     override fun onCleared() {
         super.onCleared()
         slideshowJob?.cancel()
+        pdfSearchJob?.cancel()
         decryptedTempFile?.delete()
+        viewModelScope.launch(Dispatchers.IO) {
+            PdfSessionManager.instance.close()
+            BitmapPool.clear()
+        }
     }
 }

@@ -46,6 +46,8 @@ sealed class DocumentContent {
     ) : DocumentContent()
     data class PdfContent(
         val path: String,
+        val pageCount: Int = 0,
+        val defaultAspectRatio: Float = 1.414f,
         /**
          * Extracted text for each page (index = page number - 1).
          * Empty list when extraction has not been attempted yet.
